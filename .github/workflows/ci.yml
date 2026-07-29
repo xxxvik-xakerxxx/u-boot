@@ -55,6 +55,26 @@ jobs:
           . .venv/bin/activate
           make -j"$(nproc)" CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Package flashable LK image
+        run: |
+          ./tools/mkimage \
+            -T mtk_image \
+            -a 0 \
+            -n "lk=1;lkname=lk" \
+            -d u-boot.bin \
+            u-boot-tetris-lk.img
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+
+          image = Path("u-boot-tetris-lk.img").read_bytes()
+          magic, payload_size = struct.unpack_from("<II", image, 0)
+          if magic != 0x58881688:
+              raise SystemExit(f"bad LK magic: {magic:#x}")
+          if payload_size != Path("u-boot.bin").stat().st_size:
+              raise SystemExit("LK payload size does not match u-boot.bin")
+          PY
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -62,6 +82,7 @@ jobs:
           path: |
             u-boot
             u-boot.bin
+            u-boot-tetris-lk.img
             u-boot.dtb
             u-boot-nodtb.bin
             u-boot.map
