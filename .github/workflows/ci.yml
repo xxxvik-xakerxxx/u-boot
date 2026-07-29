@@ -58,8 +58,12 @@ jobs:
       - name: Package flashable LK image
         run: |
           ./tools/mkimage \
+            -A arm64 \
+            -O u-boot \
             -T mtk_image \
+            -C none \
             -a 0 \
+            -e 0 \
             -n "lk=1;lkname=lk" \
             -d u-boot.bin \
             u-boot-tetris-lk.img
