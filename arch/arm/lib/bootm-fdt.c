@@ -50,7 +50,7 @@ int arch_fixup_fdt(void *blob)
 #endif
 	}
 
-#ifdef CONFIG_OF_LIBFDT
+#if defined(CONFIG_OF_LIBFDT) && defined(CONFIG_ARCH_FIXUP_FDT_MEMORY)
 	ret = fdt_fixup_memory_banks(blob, start, size, CONFIG_NR_DRAM_BANKS);
 	if (ret)
 		return ret;

@@ -11,6 +11,9 @@
 #include <image-sparse.h>
 #include <malloc.h>
 #include <part.h>
+#if CONFIG_IS_ENABLED(SCSI)
+#include <scsi.h>
+#endif
 
 /**
  * FASTBOOT_MAX_BLOCKS_ERASE - maximum blocks to erase per derase call
@@ -26,7 +29,7 @@
 /**
  * FASTBOOT_MAX_BLOCKS_WRITE - maximum blocks to write per dwrite call
  */
-#define FASTBOOT_MAX_BLOCKS_WRITE 65536
+#define FASTBOOT_MAX_BLOCKS_WRITE 128
 
 __weak lbaint_t fb_mmc_get_boot_offset(void)
 {
@@ -145,8 +148,13 @@ int fastboot_block_get_part_info(const char *part_name,
 		return -EINVAL;
 	}
 
+#if CONFIG_IS_ENABLED(SCSI)
+	if (!strcmp(interface, "scsi"))
+		scsi_scan(false);
+#endif
+
 	*dev_desc = blk_get_dev(interface, device);
-	if (!dev_desc) {
+	if (!*dev_desc) {
 		fastboot_fail("no such device", response);
 		return -ENODEV;
 	}

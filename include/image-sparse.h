@@ -7,7 +7,7 @@
 #include <part.h>
 #include <sparse_format.h>
 
-#define FASTBOOT_MAX_BLK_WRITE 16384
+#define FASTBOOT_MAX_BLK_WRITE 128
 
 #define ROUNDUP(x, y)	(((x) + ((y) - 1)) & ~((y) - 1))
 

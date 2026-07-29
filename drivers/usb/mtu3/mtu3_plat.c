@@ -141,12 +141,12 @@ static int get_ssusb_rscs(struct udevice *dev, struct ssusb_mtk *ssusb)
 	ret = device_get_supply_regulator(dev, "vusb33-supply",
 					  &ssusb->vusb33_supply);
 	if (ret)	/* optional, ignore error */
-		dev_warn(dev, "can't get optional vusb33 %d\n", ret);
+		dev_dbg(dev, "can't get optional vusb33 %d\n", ret);
 
 	ret = device_get_supply_regulator(dev, "vbus-supply",
 					  &ssusb->vbus_supply);
 	if (ret)	/* optional, ignore error */
-		dev_warn(dev, "can't get optional vbus regulator %d!\n", ret);
+		dev_dbg(dev, "can't get optional vbus regulator %d!\n", ret);
 
 	ret = clk_get_bulk(dev, &ssusb->clks);
 	if (ret) {
