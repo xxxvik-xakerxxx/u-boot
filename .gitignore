@@ -7,6 +7,9 @@
 #
 .*
 !.checkpatch.conf
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
 *.a
 *.asn1.[ch]
 *.bin
