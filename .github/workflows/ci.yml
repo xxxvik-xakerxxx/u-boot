@@ -55,28 +55,32 @@ jobs:
           . .venv/bin/activate
           make -j"$(nproc)" CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Download LK template
+        run: |
+          curl -fL \
+            -o /tmp/tetris-lk-template.img \
+            "https://github.com/${{ github.repository }}/releases/download/tetris-lk-template/lk-template.img"
+
       - name: Package flashable LK image
         run: |
-          ./tools/mkimage \
-            -A arm64 \
-            -O u-boot \
-            -T mtk_image \
-            -C none \
-            -a 0x50f00000 \
-            -e 0x50f00000 \
-            -n "lk=1;lkname=lk" \
-            -d u-boot.bin \
-            u-boot-tetris-lk.img
+          python3 tools/tetris_lk_image.py \
+            --template /tmp/tetris-lk-template.img \
+            --payload u-boot.bin \
+            --output u-boot-tetris-lk-tailpreserved.img \
+            --trim-fill 0xff \
+            --align 512
           python3 - <<'PY'
           from pathlib import Path
           import struct
 
-          image = Path("u-boot-tetris-lk.img").read_bytes()
+          image = Path("u-boot-tetris-lk-tailpreserved.img").read_bytes()
           magic, payload_size = struct.unpack_from("<II", image, 0)
           if magic != 0x58881688:
               raise SystemExit(f"bad LK magic: {magic:#x}")
           if payload_size != Path("u-boot.bin").stat().st_size:
               raise SystemExit("LK payload size does not match u-boot.bin")
+          if len(image) < 3 * 1024 * 1024:
+              raise SystemExit("LK image is too small; template tail was not preserved")
           PY
 
       - name: Upload build artifacts
@@ -86,7 +90,7 @@ jobs:
           path: |
             u-boot
             u-boot.bin
-            u-boot-tetris-lk.img
+            u-boot-tetris-lk-tailpreserved.img
             u-boot.dtb
             u-boot-nodtb.bin
             u-boot.map
