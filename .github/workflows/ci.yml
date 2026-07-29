@@ -62,8 +62,8 @@ jobs:
             -O u-boot \
             -T mtk_image \
             -C none \
-            -a 0 \
-            -e 0 \
+            -a 0x50f00000 \
+            -e 0x50f00000 \
             -n "lk=1;lkname=lk" \
             -d u-boot.bin \
             u-boot-tetris-lk.img
