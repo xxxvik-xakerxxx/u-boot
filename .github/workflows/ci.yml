@@ -5,6 +5,7 @@ on:
     branches:
       - "**"
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build-tetris:
@@ -55,6 +56,33 @@ jobs:
           . .venv/bin/activate
           make -j"$(nproc)" CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Validate embedded postmarketOS boot flow
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          image = Path("u-boot.bin").read_bytes()
+          expected = {
+              "load_connsys_bt": "ext4load scsi 2:52 0x85e00000 /usr/lib/firmware/connsys_bt_mt6878_mt6631.bin 0xb4e5c 0x200 && test ${filesize} = b4e5c",
+              "load_connsys_gnss": "ext4load scsi 2:52 0x860e0000 /usr/lib/firmware/connsys_gnss_mt6878_mt6631.bin 0x7fc68 0x200 && test ${filesize} = 7fc68",
+              "load_connsys_wifi": "ext4load scsi 2:52 0x86180000 /usr/lib/firmware/connsys_wifi_mt6878_mt6631.bin 0x174c24 0x200 && test ${filesize} = 174c24",
+              "load_boot_image": "ext4load scsi 2:51 0x49000000 /boot_image.itb",
+              "boot_pmos": "run scan_storage && run load_connsys_bt && run load_connsys_gnss && run load_connsys_wifi && run load_boot_image && bootm 0x49000000",
+          }
+
+          for name, value in expected.items():
+              record = f"{name}={value}\0".encode()
+              count = image.count(record)
+              if count != 1:
+                  raise SystemExit(
+                      f"expected one exact embedded {name} record, found {count}"
+                  )
+
+          handler = Path("board/mediatek/mt6878/mt6878_tetris.c").read_text()
+          if 'run_command("run boot_pmos", 0);' not in handler:
+              raise SystemExit("fastboot OEM boot_pmos does not use the environment flow")
+          PY
+
       - name: Download LK template
         run: |
           curl -fL \
@@ -66,14 +94,14 @@ jobs:
           python3 tools/tetris_lk_image.py \
             --template /tmp/tetris-lk-template.img \
             --payload u-boot.bin \
-            --output u-boot-tetris-lk-tailpreserved.img \
+            --output u-boot-tetris-lk.img \
             --trim-fill 0xff \
             --align 512
           python3 - <<'PY'
           from pathlib import Path
           import struct
 
-          image = Path("u-boot-tetris-lk-tailpreserved.img").read_bytes()
+          image = Path("u-boot-tetris-lk.img").read_bytes()
           magic, payload_size = struct.unpack_from("<II", image, 0)
           if magic != 0x58881688:
               raise SystemExit(f"bad LK magic: {magic:#x}")
@@ -83,6 +111,16 @@ jobs:
               raise SystemExit("LK image is too small; template tail was not preserved")
           PY
 
+      - name: Write artifact checksums
+        run: |
+          sha256sum \
+            u-boot.bin \
+            u-boot-tetris-lk.img \
+            u-boot.dtb \
+            u-boot-nodtb.bin \
+            > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -90,8 +128,9 @@ jobs:
           path: |
             u-boot
             u-boot.bin
-            u-boot-tetris-lk-tailpreserved.img
+            u-boot-tetris-lk.img
             u-boot.dtb
             u-boot-nodtb.bin
             u-boot.map
-          if-no-files-found: ignore
+            SHA256SUMS
+          if-no-files-found: error

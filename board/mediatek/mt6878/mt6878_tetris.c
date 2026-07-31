@@ -76,6 +76,10 @@ static int tetris_set_connsys_emimpu_regions(void)
 	int ret;
 
 	for (i = 0; i < ARRAY_SIZE(tetris_connsys_emimpu_regions); i++) {
+		if (tetris_connsys_emimpu_regions[i].id == 0x2c) {
+			printf("Tetris: defer conninfra RO protection for Linux FWDL\n");
+			continue;
+		}
 		ret = tetris_set_emimpu_region(&tetris_connsys_emimpu_regions[i]);
 		if (ret)
 			return ret;
@@ -220,9 +224,7 @@ void fastboot_oem_board(char *cmd_parameter, void *data, u32 size, char *respons
 		psci_system_off();
 	} else if (!strcmp(cmd_parameter, "boot_pmos")) {
 		fastboot_okay("booting postmarketOS", response);
-		run_command("scsi scan", 0);
-		run_command("ext4load scsi 2:51 0x49000000 /boot_image.itb", 0);
-		run_command("bootm 0x49000000", 0);
+		run_command("run boot_pmos", 0);
 	} else {
 		fastboot_fail("unknown oem_board command", response);
 	}
