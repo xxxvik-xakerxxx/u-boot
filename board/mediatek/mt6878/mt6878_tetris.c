@@ -23,6 +23,8 @@ DECLARE_GLOBAL_DATA_PTR;
 #define MTK_SIP_CONNSYS_EMI_MD		1
 #define MTK_SIP_CONNSYS_EMI_GPS		2
 #define MTK_SIP_CONNSYS_EMI_SUCCESS	0x100
+#define MTK_SIP_EMIMPU_SET		0x82000415
+#define MTK_SIP_EMIMPU_PAGE_SHIFT	12
 
 #define TETRIS_CONNSYS_EMI_BASE		0x85e00000ULL
 #define TETRIS_CONNSYS_EMI_SIZE		0x00c00000ULL
@@ -31,6 +33,56 @@ DECLARE_GLOBAL_DATA_PTR;
 #define TETRIS_MD_CACHE_EMI_BASE	0x88000000ULL
 #define TETRIS_MD_CACHE_EMI_SIZE	0x02560000ULL
 #define TETRIS_MD_CONNSYS_EMI_SIZE	0x00d80000ULL
+
+struct tetris_emimpu_region {
+	u64 start;
+	u64 end;
+	unsigned long id;
+	const char *name;
+};
+
+static const struct tetris_emimpu_region tetris_connsys_emimpu_regions[] = {
+	{ 0x85e00000ULL, 0x86480000ULL, 0x2c, "conninfra RO" },
+	{ 0x86480000ULL, 0x86900000ULL, 0x2e, "conninfra RW" },
+	{ 0x86900000ULL, 0x87f00000ULL, 0x2f, "GPS and WiFi DMA" },
+	{ 0x87f00000ULL, 0x87f20000ULL, 0x2d, "connscp shared" },
+};
+
+static int tetris_set_emimpu_region(const struct tetris_emimpu_region *region)
+{
+	struct arm_smccc_res res = { 0 };
+
+	arm_smccc_smc(MTK_SIP_EMIMPU_SET, 0,
+		      region->start >> MTK_SIP_EMIMPU_PAGE_SHIFT,
+		      region->end >> MTK_SIP_EMIMPU_PAGE_SHIFT,
+		      region->id, 0, 0, 0, &res);
+	if (res.a0) {
+		printf("Tetris: %s EMI MPU region %lx failed: %lx\n",
+		       region->name, region->id, res.a0);
+		return -EIO;
+	}
+
+	printf("Tetris: %s EMI MPU region %lx set at %llx..%llx\n",
+	       region->name, region->id,
+	       (unsigned long long)region->start,
+	       (unsigned long long)region->end);
+
+	return 0;
+}
+
+static int tetris_set_connsys_emimpu_regions(void)
+{
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < ARRAY_SIZE(tetris_connsys_emimpu_regions); i++) {
+		ret = tetris_set_emimpu_region(&tetris_connsys_emimpu_regions[i]);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
 
 static int tetris_set_connsys_emi(unsigned long selector, u64 base, u64 size,
 				  const char *name)
@@ -127,6 +179,10 @@ static int tetris_prepare_connsys_emi(const void *fdt)
 		       (unsigned long long)md_reserved_size);
 		return -FDT_ERR_BADVALUE;
 	}
+
+	ret = tetris_set_connsys_emimpu_regions();
+	if (ret)
+		return ret;
 
 	ret = tetris_set_connsys_emi(MTK_SIP_CONNSYS_EMI_MAIN, base,
 				     emi_size, "conninfra");
