@@ -20,19 +20,39 @@ DECLARE_GLOBAL_DATA_PTR;
 
 #define MTK_SIP_CONNSYS_EMI_SET		0xc200041a
 #define MTK_SIP_CONNSYS_EMI_MAIN	0
+#define MTK_SIP_CONNSYS_EMI_GPS		2
 #define MTK_SIP_CONNSYS_EMI_SUCCESS	0x100
 
 #define TETRIS_CONNSYS_EMI_BASE		0x85e00000ULL
 #define TETRIS_CONNSYS_EMI_SIZE		0x00c00000ULL
+#define TETRIS_GPS_EMI_BASE		0x86a00000ULL
+#define TETRIS_GPS_EMI_SIZE		0x00100000ULL
+
+static int tetris_set_connsys_emi(unsigned long selector, u64 base, u64 size,
+				  const char *name)
+{
+	struct arm_smccc_res res = { 0 };
+
+	arm_smccc_smc(MTK_SIP_CONNSYS_EMI_SET, selector, base, size,
+		      0, 0, 0, 0, &res);
+	if (res.a0 != MTK_SIP_CONNSYS_EMI_SUCCESS) {
+		printf("Tetris: %s EMI SMC failed: %lx\n", name, res.a0);
+		return -EIO;
+	}
+
+	printf("Tetris: %s EMI registered at %llx, size %llx\n", name,
+	       (unsigned long long)base, (unsigned long long)size);
+
+	return 0;
+}
 
 static int tetris_prepare_connsys_emi(const void *fdt)
 {
-	struct arm_smccc_res res = { 0 };
 	fdt_size_t reserved_size;
 	fdt_addr_t base;
 	const fdt32_t *memory_region;
-	u64 emi_size;
-	int consys, len, reserved;
+	u64 emi_size, gps_base, gps_size;
+	int consys, gps, len, reserved, ret;
 
 	consys = fdt_node_offset_by_compatible(fdt, -1,
 					       "mediatek,mt6878-6631-consys");
@@ -64,28 +84,35 @@ static int tetris_prepare_connsys_emi(const void *fdt)
 	}
 
 	emi_size = fdtdec_get_uint(fdt, consys, "emi-size", 0);
+	gps = fdt_node_offset_by_compatible(fdt, -1, "mediatek,mt6878-gps");
+	if (gps < 0) {
+		printf("Tetris: GPS node missing: %s\n", fdt_strerror(gps));
+		return gps;
+	}
+
+	gps_size = fdtdec_get_uint(fdt, gps, "emi-size", 0);
+	gps_base = base + emi_size;
 	if (base != TETRIS_CONNSYS_EMI_BASE ||
 	    emi_size != TETRIS_CONNSYS_EMI_SIZE ||
-	    reserved_size < emi_size) {
-		printf("Tetris: unsafe conninfra EMI base=%llx size=%llx reserved=%llx\n",
+	    gps_base != TETRIS_GPS_EMI_BASE ||
+	    gps_size != TETRIS_GPS_EMI_SIZE ||
+	    reserved_size < emi_size + gps_size) {
+		printf("Tetris: unsafe EMI layout conn=%llx/%llx gps=%llx/%llx reserved=%llx\n",
 		       (unsigned long long)base,
 		       (unsigned long long)emi_size,
+		       (unsigned long long)gps_base,
+		       (unsigned long long)gps_size,
 		       (unsigned long long)reserved_size);
 		return -FDT_ERR_BADVALUE;
 	}
 
-	arm_smccc_smc(MTK_SIP_CONNSYS_EMI_SET,
-		      MTK_SIP_CONNSYS_EMI_MAIN, base, emi_size,
-		      0, 0, 0, 0, &res);
-	if (res.a0 != MTK_SIP_CONNSYS_EMI_SUCCESS) {
-		printf("Tetris: conninfra EMI SMC failed: %lx\n", res.a0);
-		return -EIO;
-	}
+	ret = tetris_set_connsys_emi(MTK_SIP_CONNSYS_EMI_MAIN, base,
+				     emi_size, "conninfra");
+	if (ret)
+		return ret;
 
-	printf("Tetris: conninfra EMI mapped at %llx, size %llx\n",
-	       (unsigned long long)base, (unsigned long long)emi_size);
-
-	return 0;
+	return tetris_set_connsys_emi(MTK_SIP_CONNSYS_EMI_GPS, gps_base,
+				      gps_size, "GPS");
 }
 
 void board_prep_linux(struct bootm_headers *images)
