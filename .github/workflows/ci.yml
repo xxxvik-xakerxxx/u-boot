@@ -116,7 +116,6 @@ jobs:
           sha256sum \
             u-boot.bin \
             u-boot-tetris-lk.img \
-            u-boot.dtb \
             u-boot-nodtb.bin \
             > SHA256SUMS
           sha256sum --check SHA256SUMS
@@ -129,7 +128,6 @@ jobs:
             u-boot
             u-boot.bin
             u-boot-tetris-lk.img
-            u-boot.dtb
             u-boot-nodtb.bin
             u-boot.map
             SHA256SUMS
