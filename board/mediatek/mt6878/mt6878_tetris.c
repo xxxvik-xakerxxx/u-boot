@@ -225,6 +225,10 @@ void fastboot_oem_board(char *cmd_parameter, void *data, u32 size, char *respons
 	} else if (!strcmp(cmd_parameter, "boot_pmos")) {
 		fastboot_okay("booting postmarketOS", response);
 		run_command("run boot_pmos", 0);
+	} else if (!strcmp(cmd_parameter, "boot_pmos_safe")) {
+		fastboot_okay("booting postmarketOS with radio modules disabled",
+			      response);
+		run_command("run boot_pmos_safe", 0);
 	} else {
 		fastboot_fail("unknown oem_board command", response);
 	}

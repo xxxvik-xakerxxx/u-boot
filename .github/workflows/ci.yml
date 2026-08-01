@@ -64,12 +64,13 @@ jobs:
           image = Path("u-boot.bin").read_bytes()
           expected = {
               "find_pmos_partitions": "part number scsi 2 super pmos_boot_part && part number scsi 2 userdata pmos_root_part",
-              "set_pmos_bootargs": "fsuuid scsi 2:${pmos_boot_part} pmos_boot_uuid && fsuuid scsi 2:${pmos_root_part} pmos_root_uuid && setenv bootargs ${bootargs_base} pmos.boot_uuid=${pmos_boot_uuid} pmos.root_uuid=${pmos_root_uuid}",
-              "load_connsys_bt": "ext4load scsi 2:${pmos_root_part} 0x85e00000 /usr/lib/firmware/connsys_bt_mt6878_mt6631.bin 0xb4e5c 0x200 && test ${filesize} = b4e5c",
-              "load_connsys_gnss": "ext4load scsi 2:${pmos_root_part} 0x860e0000 /usr/lib/firmware/connsys_gnss_mt6878_mt6631.bin 0x7fc68 0x200 && test ${filesize} = 7fc68",
-              "load_connsys_wifi": "ext4load scsi 2:${pmos_root_part} 0x86180000 /usr/lib/firmware/connsys_wifi_mt6878_mt6631.bin 0x174c24 0x200 && test ${filesize} = 174c24",
+              "set_pmos_bootargs": "fsuuid scsi 2:${pmos_boot_part} pmos_boot_uuid && fsuuid scsi 2:${pmos_root_part} pmos_root_uuid && setenv bootargs ${bootargs_base} pmos.boot_uuid=${pmos_boot_uuid} pmos.root_uuid=${pmos_root_uuid} ${bootargs_extra}",
+              "load_connsys_bt": "ext4load scsi 2:${pmos_root_part} 0x85e00000 /usr/lib/firmware/connsys_bt_mt6878_mt6631.bin 0xb4e5c && test ${filesize} = b4e5c",
+              "load_connsys_gnss": "ext4load scsi 2:${pmos_root_part} 0x860e0000 /usr/lib/firmware/connsys_gnss_mt6878_mt6631.bin 0x7fc68 && test ${filesize} = 7fc68",
+              "load_connsys_wifi": "ext4load scsi 2:${pmos_root_part} 0x86180000 /usr/lib/firmware/connsys_wifi_mt6878_mt6631.bin 0x174c24 && test ${filesize} = 174c24",
               "load_boot_image": "ext4load scsi 2:${pmos_boot_part} 0x49000000 /boot_image.itb",
               "boot_pmos": "run scan_storage && run find_pmos_partitions && run set_pmos_bootargs && run load_connsys_bt && run load_connsys_gnss && run load_connsys_wifi && run load_boot_image && bootm 0x49000000",
+              "boot_pmos_safe": "setenv bootargs_extra ${bootargs_safe}; run boot_pmos; setenv bootargs_extra",
               "normal_boot": 'if run boot_pmos; then true; else setcurs 0 3; lcdputs "Failed to boot postmarketOS!"; run menucmd; fi',
           }
 
@@ -90,6 +91,8 @@ jobs:
           handler = Path("board/mediatek/mt6878/mt6878_tetris.c").read_text()
           if 'run_command("run boot_pmos", 0);' not in handler:
               raise SystemExit("fastboot OEM boot_pmos does not use the environment flow")
+          if 'run_command("run boot_pmos_safe", 0);' not in handler:
+              raise SystemExit("fastboot OEM boot_pmos_safe is unavailable")
           PY
 
       - name: Download LK template
