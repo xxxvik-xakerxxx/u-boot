@@ -6,7 +6,6 @@
 #include <config.h>
 #include <bootm.h>
 #include <command.h>
-#include <cpu_func.h>
 #include <env.h>
 #include <fastboot.h>
 #include <fdtdec.h>
@@ -77,6 +76,10 @@ static int tetris_set_connsys_emimpu_regions(void)
 	int ret;
 
 	for (i = 0; i < ARRAY_SIZE(tetris_connsys_emimpu_regions); i++) {
+		if (tetris_connsys_emimpu_regions[i].id == 0x2c) {
+			printf("Tetris: defer conninfra RO protection for Linux FWDL\n");
+			continue;
+		}
 		ret = tetris_set_emimpu_region(&tetris_connsys_emimpu_regions[i]);
 		if (ret)
 			return ret;
@@ -180,9 +183,6 @@ static int tetris_prepare_connsys_emi(const void *fdt)
 		       (unsigned long long)md_reserved_size);
 		return -FDT_ERR_BADVALUE;
 	}
-
-	/* Match LK: publish the preloaded RO firmware before setting EMI MPU. */
-	flush_dcache_range(TETRIS_CONNSYS_EMI_BASE, 0x86480000ULL);
 
 	ret = tetris_set_connsys_emimpu_regions();
 	if (ret)
