@@ -89,10 +89,23 @@ jobs:
                   )
 
           handler = Path("board/mediatek/mt6878/mt6878_tetris.c").read_text()
-          if 'run_command("run boot_pmos", 0);' not in handler:
-              raise SystemExit("fastboot OEM boot_pmos does not use the environment flow")
-          if 'run_command("run boot_pmos_safe", 0);' not in handler:
-              raise SystemExit("fastboot OEM boot_pmos_safe is unavailable")
+          direct_boot_records = (
+              'run_command("run find_pmos_partitions", 0)',
+              'run_command("run set_pmos_bootargs", 0)',
+              'ext4load scsi 2:${pmos_root_part} 0x85e00000',
+              'ext4load scsi 2:${pmos_root_part} 0x860e0000',
+              'ext4load scsi 2:${pmos_root_part} 0x86180000',
+              'run_command("run load_boot_image", 0)',
+              'tetris_boot_pmos(NULL)',
+              'tetris_boot_pmos(env_get("bootargs_safe"))',
+          )
+          for record in direct_boot_records:
+              if record not in handler:
+                  raise SystemExit(f"missing direct boot record: {record}")
+          if 'defer conninfra RO protection' in handler:
+              raise SystemExit("conninfra RO EMI MPU protection is still deferred")
+          if 'flush_dcache_range' in handler:
+              raise SystemExit("unvalidated conninfra cache maintenance is enabled")
           PY
 
       - name: Download LK template
@@ -115,10 +128,16 @@ jobs:
 
           image = Path("u-boot-tetris-lk.img").read_bytes()
           magic, payload_size = struct.unpack_from("<II", image, 0)
+          raw_payload_size = Path("u-boot.bin").stat().st_size
+          expected_payload_size = (raw_payload_size + 15) & ~15
           if magic != 0x58881688:
               raise SystemExit(f"bad LK magic: {magic:#x}")
-          if payload_size != Path("u-boot.bin").stat().st_size:
-              raise SystemExit("LK payload size does not match u-boot.bin")
+          if payload_size != expected_payload_size:
+              raise SystemExit(
+                  "LK payload size does not match 16-byte-aligned u-boot.bin"
+              )
+          if payload_size % 16:
+              raise SystemExit("LK payload is not 16-byte aligned")
           if len(image) < 3 * 1024 * 1024:
               raise SystemExit("LK image is too small; template tail was not preserved")
           PY

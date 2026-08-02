@@ -76,10 +76,6 @@ static int tetris_set_connsys_emimpu_regions(void)
 	int ret;
 
 	for (i = 0; i < ARRAY_SIZE(tetris_connsys_emimpu_regions); i++) {
-		if (tetris_connsys_emimpu_regions[i].id == 0x2c) {
-			printf("Tetris: defer conninfra RO protection for Linux FWDL\n");
-			continue;
-		}
 		ret = tetris_set_emimpu_region(&tetris_connsys_emimpu_regions[i]);
 		if (ret)
 			return ret;
@@ -212,6 +208,54 @@ void board_prep_linux(struct bootm_headers *images)
 		panic("Tetris: refusing Linux boot without conninfra EMI mapping\n");
 }
 
+static int tetris_boot_pmos(const char *extra_bootargs)
+{
+	int ret;
+
+	env_set("bootargs_extra", extra_bootargs ? extra_bootargs : "");
+	if (run_command("run scan_storage", 0)) {
+		ret = -EIO;
+		goto out;
+	}
+	if (run_command("run find_pmos_partitions", 0)) {
+		ret = -ENOENT;
+		goto out;
+	}
+	if (run_command("run set_pmos_bootargs", 0)) {
+		ret = -EINVAL;
+		goto out;
+	}
+	if (run_command("ext4load scsi 2:${pmos_root_part} 0x85e00000 "
+			"/usr/lib/firmware/connsys_bt_mt6878_mt6631.bin "
+			"0xb4e5c", 0)) {
+		ret = -ENOENT;
+		goto out;
+	}
+	if (run_command("ext4load scsi 2:${pmos_root_part} 0x860e0000 "
+			"/usr/lib/firmware/connsys_gnss_mt6878_mt6631.bin "
+			"0x7fc68", 0)) {
+		ret = -ENOENT;
+		goto out;
+	}
+	if (run_command("ext4load scsi 2:${pmos_root_part} 0x86180000 "
+			"/usr/lib/firmware/connsys_wifi_mt6878_mt6631.bin "
+			"0x174c24", 0)) {
+		ret = -ENOENT;
+		goto out;
+	}
+	if (run_command("run load_boot_image", 0)) {
+		ret = -ENOENT;
+		goto out;
+	}
+
+	ret = run_command("bootm 0x49000000", 0);
+
+out:
+	env_set("bootargs_extra", "");
+
+	return ret;
+}
+
 void fastboot_oem_board(char *cmd_parameter, void *data, u32 size, char *response)
 {
 	if (!cmd_parameter) {
@@ -224,11 +268,11 @@ void fastboot_oem_board(char *cmd_parameter, void *data, u32 size, char *respons
 		psci_system_off();
 	} else if (!strcmp(cmd_parameter, "boot_pmos")) {
 		fastboot_okay("booting postmarketOS", response);
-		run_command("run boot_pmos", 0);
+		tetris_boot_pmos(NULL);
 	} else if (!strcmp(cmd_parameter, "boot_pmos_safe")) {
 		fastboot_okay("booting postmarketOS with radio modules disabled",
 			      response);
-		run_command("run boot_pmos_safe", 0);
+		tetris_boot_pmos(env_get("bootargs_safe"));
 	} else {
 		fastboot_fail("unknown oem_board command", response);
 	}

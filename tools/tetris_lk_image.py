@@ -33,11 +33,18 @@ def main() -> None:
     parser.add_argument("--payload", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--trim-fill", type=parse_byte)
+    parser.add_argument("--payload-align", type=int, default=16)
     parser.add_argument("--align", type=int, default=512)
     args = parser.parse_args()
 
     template = args.template.read_bytes()
     payload = args.payload.read_bytes()
+
+    if args.payload_align <= 0:
+        raise SystemExit("payload alignment must be positive")
+    padding = (-len(payload)) % args.payload_align
+    if padding:
+        payload += bytes(padding)
 
     if len(template) < LK_HEADER_SIZE:
         raise SystemExit("template is shorter than the LK header")
@@ -61,6 +68,7 @@ def main() -> None:
     print(f"template_size={len(template)}")
     print(f"old_payload_size={old_size}")
     print(f"new_payload_size={len(payload)}")
+    print(f"payload_padding={padding}")
     print(f"tail_size={len(tail)}")
     print(f"output_size={len(image)}")
 
