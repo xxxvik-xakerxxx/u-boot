@@ -125,9 +125,12 @@ jobs:
 
           config = Path(".config").read_text()
           for symbol in (
+              "CONFIG_BUTTON_CMD=y",
               "CONFIG_BUTTON_GPIO=y",
               "CONFIG_BUTTON_MTK_PMIC=y",
               "CONFIG_BUTTON_REMAP_PHONE_KEYS=y",
+              "CONFIG_DM_KEYBOARD=y",
+              "CONFIG_BUTTON_KEYBOARD=y",
           ):
               if symbol not in config.splitlines():
                   raise SystemExit(f"missing Tetris button config: {symbol}")
