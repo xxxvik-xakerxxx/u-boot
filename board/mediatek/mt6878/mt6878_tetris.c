@@ -33,6 +33,12 @@ DECLARE_GLOBAL_DATA_PTR;
 #define TETRIS_MD_CACHE_EMI_BASE	0x88000000ULL
 #define TETRIS_MD_CACHE_EMI_SIZE	0x02560000ULL
 #define TETRIS_MD_CONNSYS_EMI_SIZE	0x00d80000ULL
+#define TETRIS_DEVINFO_MAX_WORDS	400
+
+struct tetris_devinfo_tag {
+	u32 data_size;
+	u32 data[];
+};
 
 struct tetris_emimpu_region {
 	u64 start;
@@ -199,11 +205,61 @@ static int tetris_prepare_connsys_emi(const void *fdt)
 				      gps_size, "GPS");
 }
 
+static int tetris_handoff_devinfo(void *fdt)
+{
+	const struct tetris_devinfo_tag *tag;
+	const void *prev_fdt;
+	int chosen, len, prev_chosen, ret;
+	ulong prev_fdt_addr;
+	u32 words;
+
+	prev_fdt_addr = env_get_hex("prevbl_fdt_addr", 0);
+	if (!prev_fdt_addr)
+		return -ENODATA;
+
+	prev_fdt = (const void *)prev_fdt_addr;
+	if (fdt_check_header(prev_fdt))
+		return -ENODATA;
+
+	prev_chosen = fdt_path_offset(prev_fdt, "/chosen");
+	if (prev_chosen < 0)
+		prev_chosen = fdt_path_offset(prev_fdt, "/chosen@0");
+	if (prev_chosen < 0)
+		return prev_chosen;
+
+	tag = fdt_getprop(prev_fdt, prev_chosen, "atag,devinfo", &len);
+	if (!tag || len < sizeof(*tag))
+		return -ENODATA;
+
+	memcpy(&words, &tag->data_size, sizeof(words));
+	if (!words || words > TETRIS_DEVINFO_MAX_WORDS ||
+	    len < sizeof(*tag) + words * sizeof(u32))
+		return -EINVAL;
+
+	chosen = fdt_path_offset(fdt, "/chosen");
+	if (chosen < 0)
+		return chosen;
+
+	ret = fdt_setprop(fdt, chosen, "atag,devinfo", tag,
+			  sizeof(*tag) + words * sizeof(u32));
+	if (ret)
+		return ret;
+
+	printf("Tetris: handed off %u devinfo words from LK\n", words);
+
+	return 0;
+}
+
 void board_prep_linux(struct bootm_headers *images)
 {
 	int ret;
+	void *fdt = (void *)images->ft_addr;
 
-	ret = tetris_prepare_connsys_emi((const void *)images->ft_addr);
+	ret = tetris_handoff_devinfo(fdt);
+	if (ret)
+		printf("Tetris: LK devinfo handoff unavailable: %d\n", ret);
+
+	ret = tetris_prepare_connsys_emi(fdt);
 	if (ret)
 		panic("Tetris: refusing Linux boot without conninfra EMI mapping\n");
 }

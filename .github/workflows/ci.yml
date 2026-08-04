@@ -131,9 +131,19 @@ jobs:
               "CONFIG_BUTTON_REMAP_PHONE_KEYS=y",
               "CONFIG_DM_KEYBOARD=y",
               "CONFIG_BUTTON_KEYBOARD=y",
+              "CONFIG_SAVE_PREV_BL_FDT_ADDR=y",
           ):
               if symbol not in config.splitlines():
                   raise SystemExit(f"missing Tetris button config: {symbol}")
+
+          for record in (
+              'env_get_hex("prevbl_fdt_addr", 0)',
+              'fdt_getprop(prev_fdt, prev_chosen, "atag,devinfo", &len)',
+              'fdt_setprop(fdt, chosen, "atag,devinfo", tag,',
+              'printf("Tetris: LK devinfo handoff unavailable: %d\\n", ret)',
+          ):
+              if record not in handler:
+                  raise SystemExit(f"missing validated LK devinfo handoff: {record}")
           PY
 
       - name: Download LK template
