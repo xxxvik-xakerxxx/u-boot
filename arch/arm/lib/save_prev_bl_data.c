@@ -11,18 +11,20 @@
 #include <fdt_support.h>
 #include <fdt.h>
 #include <linux/errno.h>
+#include <linux/sizes.h>
 #include <asm/system.h>
 #include <asm/armv8/mmu.h>
 
 static ulong reg0 __section(".data");
+static ulong reg2 __section(".data");
 
 /**
- * Save x0 register value, assuming previous bootloader set it to
- * point on loaded fdt or (for older linux kernels)atags.
+ * Save boot registers used by the arm64 and legacy ARM boot protocols.
  */
-void save_boot_params(ulong r0)
+void save_boot_params(ulong r0, ulong r1, ulong r2_arg, ulong r3)
 {
 	reg0 = r0;
+	reg2 = r2_arg;
 	save_boot_params_ret();
 }
 
@@ -44,9 +46,47 @@ bool is_addr_accessible(phys_addr_t addr)
 	return false;
 }
 
+static bool fdt_has_devinfo(ulong addr)
+{
+	struct fdt_header *fdt_blob = (struct fdt_header *)addr;
+	int chosen, len;
+
+	if (!is_addr_accessible((phys_addr_t)addr) || !fdt_valid(&fdt_blob))
+		return false;
+
+	chosen = fdt_path_offset(fdt_blob, "/chosen");
+	if (chosen < 0)
+		chosen = fdt_path_offset(fdt_blob, "/chosen@0");
+	if (chosen < 0)
+		return false;
+
+	return fdt_getprop(fdt_blob, chosen, "atag,devinfo", &len) &&
+	       len > sizeof(u32);
+}
+
 phys_addr_t get_prev_bl_fdt_addr(void)
 {
-	return reg0;
+	struct fdt_header *fdt_blob;
+	ulong addr = reg0;
+
+	/*
+	 * MTK LK passes its augmented FDT in x2 on Tetris while x0 can still
+	 * contain another valid FDT. Prefer x2 only when it carries the devinfo
+	 * calibration payload needed by Linux.
+	 */
+	if (IS_ENABLED(CONFIG_TARGET_MT6878) &&
+	    reg2 >= SZ_1G &&
+	    fdt_has_devinfo(reg2)) {
+		return reg2;
+	}
+
+	if (is_addr_accessible((phys_addr_t)addr)) {
+		fdt_blob = (struct fdt_header *)addr;
+		if (fdt_valid(&fdt_blob))
+			return addr;
+	}
+
+	return 0;
 }
 
 int save_prev_bl_data(void)
@@ -55,14 +95,11 @@ int save_prev_bl_data(void)
 	int node;
 	u64 initrd_start_prop;
 
-	if (!is_addr_accessible((phys_addr_t)reg0))
+	reg0 = get_prev_bl_fdt_addr();
+	if (!reg0)
 		return -ENODATA;
 
 	fdt_blob = (struct fdt_header *)reg0;
-	if (!fdt_valid(&fdt_blob)) {
-		pr_warn("%s: address 0x%lx is not a valid fdt\n", __func__, reg0);
-		return -ENODATA;
-	}
 
 	if (IS_ENABLED(CONFIG_SAVE_PREV_BL_FDT_ADDR))
 		env_set_addr("prevbl_fdt_addr", (void *)reg0);

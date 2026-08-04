@@ -144,6 +144,23 @@ jobs:
           ):
               if record not in handler:
                   raise SystemExit(f"missing validated LK devinfo handoff: {record}")
+
+          prevbl = Path("arch/arm/lib/save_prev_bl_data.c").read_text()
+          for record in (
+              "reg2 = r2_arg;",
+              "IS_ENABLED(CONFIG_TARGET_MT6878)",
+              "reg2 >= SZ_1G",
+              'fdt_has_devinfo(reg2)',
+              'fdt_getprop(fdt_blob, chosen, "atag,devinfo", &len)',
+              "fdt_valid(&fdt_blob)",
+          ):
+              if record not in prevbl:
+                  raise SystemExit(f"missing MT6878 legacy FDT fallback: {record}")
+          if prevbl.index("fdt_has_devinfo(reg2)") > prevbl.index(
+              "is_addr_accessible((phys_addr_t)addr)",
+              prevbl.index("phys_addr_t get_prev_bl_fdt_addr(void)"),
+          ):
+              raise SystemExit("MT6878 devinfo FDT is not preferred over generic x0")
           PY
 
       - name: Download LK template
