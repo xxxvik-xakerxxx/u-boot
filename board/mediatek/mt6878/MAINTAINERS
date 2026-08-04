@@ -4,3 +4,4 @@ S:	Maintained
 F:	board/mediatek/mt6878
 F:	include/configs/mt6878.h
 F:	configs/mt6878_tetris_defconfig
+F:	doc/board/mediatek/mt6878-tetris.rst

@@ -6,4 +6,5 @@ Mediatek
 .. toctree::
    :maxdepth: 2
 
+   mt6878-tetris
    mt7621
