@@ -122,6 +122,15 @@ jobs:
           ):
               if record not in board_dts:
                   raise SystemExit(f"missing Tetris button record: {record}")
+
+          config = Path(".config").read_text()
+          for symbol in (
+              "CONFIG_BUTTON_GPIO=y",
+              "CONFIG_BUTTON_MTK_PMIC=y",
+              "CONFIG_BUTTON_REMAP_PHONE_KEYS=y",
+          ):
+              if symbol not in config.splitlines():
+                  raise SystemExit(f"missing Tetris button config: {symbol}")
           PY
 
       - name: Download LK template
