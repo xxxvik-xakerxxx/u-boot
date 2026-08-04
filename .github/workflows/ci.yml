@@ -113,6 +113,15 @@ jobs:
           board_dts = Path("arch/arm/dts/mt6878-nothing-tetris.dts").read_text()
           if "pinmux = <PINMUX_GPIO54__FUNC_GPIO54>;" not in board_dts:
               raise SystemExit("Volume Down GPIO54 is not muxed as a GPIO input")
+          for record in (
+              'compatible = "mediatek,mt6363-buttons-raw";',
+              'label = "Volume Up";',
+              'linux,code = <KEY_VOLUMEUP>;',
+              'label = "Power";',
+              'linux,code = <KEY_POWER>;',
+          ):
+              if record not in board_dts:
+                  raise SystemExit(f"missing Tetris button record: {record}")
           PY
 
       - name: Download LK template
