@@ -72,6 +72,9 @@ jobs:
               "boot_pmos": "run scan_storage && run find_pmos_partitions && run set_pmos_bootargs && run load_connsys_bt && run load_connsys_gnss && run load_connsys_wifi && run load_boot_image && bootm 0x49000000",
               "boot_pmos_safe": "setenv bootargs_extra ${bootargs_safe}; run boot_pmos; setenv bootargs_extra",
               "normal_boot": 'if run boot_pmos; then true; else setcurs 0 3; lcdputs "Failed to boot postmarketOS!"; run menucmd; fi',
+              "bootcmd": "run normal_boot",
+              "button_cmd_0_name": "Volume Down",
+              "button_cmd_0": "run fastboot",
           }
 
           for name, value in expected.items():
