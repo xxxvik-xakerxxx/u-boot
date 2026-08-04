@@ -109,6 +109,10 @@ jobs:
               raise SystemExit("conninfra RO EMI MPU protection is still deferred")
           if 'flush_dcache_range' in handler:
               raise SystemExit("unvalidated conninfra cache maintenance is enabled")
+
+          board_dts = Path("arch/arm/dts/mt6878-nothing-tetris.dts").read_text()
+          if "pinmux = <PINMUX_GPIO54__FUNC_GPIO54>;" not in board_dts:
+              raise SystemExit("Volume Down GPIO54 is not muxed as a GPIO input")
           PY
 
       - name: Download LK template

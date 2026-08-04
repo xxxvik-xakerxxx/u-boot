@@ -57,7 +57,7 @@
 &pio {
 	key_gpio_default:key-default {
 		pins-cmd1-dat {
-			//pinmux = <PINMUX_GPIO54__FUNC_GPIO54>;
+			pinmux = <PINMUX_GPIO54__FUNC_GPIO54>;
 			input-enable;
 			bias-pull-up;
 		};
