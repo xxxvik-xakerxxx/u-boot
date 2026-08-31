@@ -3,6 +3,39 @@
  * Copyright (C) 2025 Igor Belwon <igor.belwon@mentallysanemainliners.org>
  */
 
+#ifdef TETRIS_CCCI_HANDOFF_HOST_TEST
+#include <errno.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <libfdt.h>
+
+typedef unsigned char u8;
+typedef unsigned int u32;
+typedef __UINT64_TYPE__ u64;
+
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#define BIT(nr) (1UL << (nr))
+#define get_unaligned_le32(p) tetris_test_get_le32(p)
+#define get_unaligned_le64(p) tetris_test_get_le64(p)
+
+static u32 tetris_test_get_le32(const void *ptr)
+{
+	const u8 *p = ptr;
+
+	return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 |
+	       (u32)p[3] << 24;
+}
+
+static u64 tetris_test_get_le64(const void *ptr)
+{
+	return get_unaligned_le32(ptr) |
+	       (u64)get_unaligned_le32((const u8 *)ptr + 4) << 32;
+}
+#else
 #include <config.h>
 #include <bootm.h>
 #include <command.h>
@@ -10,12 +43,549 @@
 #include <fastboot.h>
 #include <fdtdec.h>
 #include <init.h>
+#include <mapmem.h>
 #include <asm/global_data.h>
 #include <asm/io.h>
 #include <asm/system.h>
+#include <asm/unaligned.h>
 #include <linux/arm-smccc.h>
 #include <linux/libfdt.h>
 #include <string.h>
+#endif
+
+#define TETRIS_CCCI_MAX_INFO_SIZE	0x10000U
+#define TETRIS_CCCI_V1_DESC_SIZE	16U
+#define TETRIS_CCCI_V2_DESC_SIZE	32U
+#define TETRIS_CCCI_V1_NAME_SIZE	16U
+#define TETRIS_CCCI_V2_NAME_SIZE	64U
+#define TETRIS_CCCI_V1_TAG_SIZE		28U
+#define TETRIS_CCCI_V2_TAG_SIZE		76U
+#define TETRIS_CCCI_MAX_TAGS \
+	(TETRIS_CCCI_MAX_INFO_SIZE / TETRIS_CCCI_V1_TAG_SIZE)
+
+#define TETRIS_CCCI_CORE_HDR_COUNT	BIT(0)
+#define TETRIS_CCCI_CORE_HDR_TABLE	BIT(1)
+#define TETRIS_CCCI_CORE_MD_LAYOUT	BIT(2)
+#define TETRIS_CCCI_CORE_MD_CHECK	BIT(3)
+#define TETRIS_CCCI_CORE_MD_IMAGE	BIT(4)
+#define TETRIS_CCCI_CORE_SMEM_LAYOUT	BIT(5)
+#define TETRIS_CCCI_CORE_NC_SMEM		BIT(6)
+#define TETRIS_CCCI_CORE_PHY_CAP		BIT(7)
+enum tetris_ccci_failure {
+	TETRIS_CCCI_OK,
+	TETRIS_CCCI_NO_FDT,
+	TETRIS_CCCI_NO_NODE,
+	TETRIS_CCCI_NO_DESCRIPTOR,
+	TETRIS_CCCI_BAD_DESCRIPTOR_SIZE,
+	TETRIS_CCCI_BAD_DESCRIPTOR,
+	TETRIS_CCCI_RANGE_OVERFLOW,
+	TETRIS_CCCI_NOT_RESERVED,
+	TETRIS_CCCI_NOT_DRAM,
+	TETRIS_CCCI_MAP_FAILED,
+	TETRIS_CCCI_BAD_TAG_COUNT,
+	TETRIS_CCCI_BAD_TAG_HEADER,
+	TETRIS_CCCI_BAD_TAG_NAME,
+	TETRIS_CCCI_BAD_TAG_DATA,
+	TETRIS_CCCI_TAG_CYCLE,
+	TETRIS_CCCI_TAG_COUNT_MISMATCH,
+	TETRIS_CCCI_DUPLICATE_CORE_TAG,
+};
+
+struct tetris_ccci_result {
+	u32 version;
+	u32 size;
+	u32 count;
+	u32 known_tags;
+	enum tetris_ccci_failure failure;
+};
+
+struct tetris_ccci_descriptor {
+	u64 base;
+	u32 size;
+	u32 count;
+	u32 version;
+};
+
+struct tetris_ccci_access {
+	bool (*range_allowed)(u64 base, u32 size, void *context);
+	const void *(*map)(u64 base, u32 size, void *context);
+	void (*unmap)(const void *buffer, void *context);
+	void *context;
+};
+
+struct tetris_ccci_core_tag {
+	const char *name;
+	u32 bit;
+	u32 exact_size;
+	u32 size_multiple;
+	u32 max_size;
+};
+
+static const struct tetris_ccci_core_tag tetris_ccci_core_tags[] = {
+	{ "hdr_count", TETRIS_CCCI_CORE_HDR_COUNT, 4, 0, 0 },
+	{ "hdr_tbl_inf", TETRIS_CCCI_CORE_HDR_TABLE, 24, 0, 0 },
+	{ "md_mem_layout", TETRIS_CCCI_CORE_MD_LAYOUT, 0, 24, 1024 },
+	{ "md1_chk", TETRIS_CCCI_CORE_MD_CHECK, 0, 0, 512 },
+	{ "md1img", TETRIS_CCCI_CORE_MD_IMAGE, 4, 0, 0 },
+	{ "smem_layout", TETRIS_CCCI_CORE_SMEM_LAYOUT, 40, 0, 0 },
+	{ "nc_smem_info_ext", TETRIS_CCCI_CORE_NC_SMEM, 0, 16, 0 },
+	{ "md1_phy_cap", TETRIS_CCCI_CORE_PHY_CAP, 4, 0, 0 },
+};
+
+static const char *const tetris_ccci_failure_names[] = {
+	[TETRIS_CCCI_OK] = "none",
+	[TETRIS_CCCI_NO_FDT] = "no-fdt",
+	[TETRIS_CCCI_NO_NODE] = "no-node",
+	[TETRIS_CCCI_NO_DESCRIPTOR] = "no-descriptor",
+	[TETRIS_CCCI_BAD_DESCRIPTOR_SIZE] = "bad-descriptor-size",
+	[TETRIS_CCCI_BAD_DESCRIPTOR] = "bad-descriptor",
+	[TETRIS_CCCI_RANGE_OVERFLOW] = "range-overflow",
+	[TETRIS_CCCI_NOT_RESERVED] = "not-reserved",
+	[TETRIS_CCCI_NOT_DRAM] = "not-dram",
+	[TETRIS_CCCI_MAP_FAILED] = "map-failed",
+	[TETRIS_CCCI_BAD_TAG_COUNT] = "bad-tag-count",
+	[TETRIS_CCCI_BAD_TAG_HEADER] = "bad-tag-header",
+	[TETRIS_CCCI_BAD_TAG_NAME] = "bad-tag-name",
+	[TETRIS_CCCI_BAD_TAG_DATA] = "bad-tag-data",
+	[TETRIS_CCCI_TAG_CYCLE] = "tag-cycle",
+	[TETRIS_CCCI_TAG_COUNT_MISMATCH] = "tag-count-mismatch",
+	[TETRIS_CCCI_DUPLICATE_CORE_TAG] = "duplicate-core-tag",
+};
+
+static bool tetris_ccci_range_end(u64 base, u64 size, u64 *end)
+{
+	if (!size || base > UINT64_MAX - size)
+		return false;
+
+	*end = base + size;
+	return true;
+}
+
+static bool tetris_ccci_range_contains(u64 outer_base, u64 outer_size,
+				       u64 base, u64 size)
+{
+	u64 end, outer_end;
+
+	return tetris_ccci_range_end(base, size, &end) &&
+	       tetris_ccci_range_end(outer_base, outer_size, &outer_end) &&
+	       base >= outer_base && end <= outer_end;
+}
+
+static u64 tetris_ccci_read_cells(const fdt32_t *cells, int count)
+{
+	u64 value = 0;
+
+	while (count--)
+		value = value << 32 | fdt32_to_cpu(*cells++);
+
+	return value;
+}
+
+static bool tetris_ccci_reserved_by_memreserve(const void *fdt, u64 base,
+					       u32 size)
+{
+	u64 reserved_base, reserved_size;
+	int count, i;
+
+	count = fdt_num_mem_rsv(fdt);
+	if (count < 0)
+		return false;
+
+	for (i = 0; i < count; i++) {
+		if (fdt_get_mem_rsv(fdt, i, &reserved_base, &reserved_size))
+			return false;
+		if (tetris_ccci_range_contains(reserved_base, reserved_size,
+					       base, size))
+			return true;
+	}
+
+	return false;
+}
+
+static bool tetris_ccci_node_enabled(const void *fdt, int node)
+{
+	const char *status;
+	int len;
+
+	status = fdt_getprop(fdt, node, "status", &len);
+	if (!status)
+		return len == -FDT_ERR_NOTFOUND;
+
+	return (len == 3 && !memcmp(status, "ok", 3)) ||
+	       (len == 5 && !memcmp(status, "okay", 5));
+}
+
+static bool tetris_ccci_reserved_by_node(const void *fdt, u64 base, u32 size)
+{
+	const fdt32_t *reg;
+	int addr_cells, child, len, parent, size_cells, tuple_cells;
+
+	parent = fdt_path_offset(fdt, "/reserved-memory");
+	if (parent < 0)
+		return false;
+
+	addr_cells = fdt_address_cells(fdt, parent);
+	size_cells = fdt_size_cells(fdt, parent);
+	if (addr_cells < 1 || addr_cells > 2 || size_cells < 1 ||
+	    size_cells > 2)
+		return false;
+	tuple_cells = addr_cells + size_cells;
+
+	fdt_for_each_subnode(child, fdt, parent) {
+		int offset;
+
+		if (!tetris_ccci_node_enabled(fdt, child))
+			continue;
+		reg = fdt_getprop(fdt, child, "reg", &len);
+		if (!reg || len <= 0 || len % (tuple_cells * sizeof(*reg)))
+			continue;
+
+		for (offset = 0; offset < len / (int)sizeof(*reg);
+		     offset += tuple_cells) {
+			u64 reserved_base, reserved_size;
+
+			reserved_base = tetris_ccci_read_cells(reg + offset,
+							       addr_cells);
+			reserved_size = tetris_ccci_read_cells(reg + offset +
+								 addr_cells,
+						       size_cells);
+			if (tetris_ccci_range_contains(reserved_base,
+						       reserved_size, base, size))
+				return true;
+		}
+	}
+
+	return false;
+}
+
+static bool tetris_ccci_buffer_reserved(const void *fdt, u64 base, u32 size)
+{
+	return tetris_ccci_reserved_by_memreserve(fdt, base, size) ||
+	       tetris_ccci_reserved_by_node(fdt, base, size);
+}
+
+static bool tetris_ccci_buffer_in_lk_memory(const void *fdt, u64 base,
+					    u32 size)
+{
+	const fdt32_t *reg;
+	const char *device_type;
+	int addr_cells, len, node, size_cells, tuple_cells;
+
+	addr_cells = fdt_address_cells(fdt, 0);
+	size_cells = fdt_size_cells(fdt, 0);
+	if (addr_cells < 1 || addr_cells > 2 || size_cells < 1 ||
+	    size_cells > 2)
+		return false;
+	tuple_cells = addr_cells + size_cells;
+
+	fdt_for_each_subnode(node, fdt, 0) {
+		int offset;
+
+		device_type = fdt_getprop(fdt, node, "device_type", &len);
+		if (!device_type || len != sizeof("memory") ||
+		    memcmp(device_type, "memory", sizeof("memory")))
+			continue;
+		reg = fdt_getprop(fdt, node, "reg", &len);
+		if (!reg || len <= 0 || len % (tuple_cells * sizeof(*reg)))
+			continue;
+
+		for (offset = 0; offset < len / (int)sizeof(*reg);
+		     offset += tuple_cells) {
+			const fdt32_t *tuple = reg + offset;
+			u64 memory_base, memory_size;
+
+			memory_base = tetris_ccci_read_cells(tuple, addr_cells);
+			memory_size = tetris_ccci_read_cells(tuple + addr_cells,
+							     size_cells);
+			if (tetris_ccci_range_contains(memory_base, memory_size,
+						       base, size))
+				return true;
+		}
+	}
+
+	return false;
+}
+
+static int tetris_ccci_read_descriptor(const void *fdt,
+				       struct tetris_ccci_descriptor *desc,
+				       struct tetris_ccci_result *result)
+{
+	const u8 *raw;
+	int len, node;
+
+	if (!fdt || fdt_check_header(fdt)) {
+		result->failure = TETRIS_CCCI_NO_FDT;
+		return -EINVAL;
+	}
+
+	node = fdt_node_offset_by_compatible(fdt, -1, "mediatek,mddriver");
+	if (node < 0) {
+		result->failure = TETRIS_CCCI_NO_NODE;
+		return -ENODATA;
+	}
+
+	raw = fdt_getprop(fdt, node, "ccci,modem_info_v2", &len);
+	if (!raw) {
+		if (len != -FDT_ERR_NOTFOUND) {
+			result->failure = TETRIS_CCCI_BAD_DESCRIPTOR_SIZE;
+			return -EINVAL;
+		}
+		raw = fdt_getprop(fdt, node, "ccci,modem_info", &len);
+		if (!raw) {
+			result->failure = len == -FDT_ERR_NOTFOUND ?
+				TETRIS_CCCI_NO_DESCRIPTOR :
+				TETRIS_CCCI_BAD_DESCRIPTOR_SIZE;
+			return len == -FDT_ERR_NOTFOUND ? -ENODATA : -EINVAL;
+		}
+		if (len != TETRIS_CCCI_V1_DESC_SIZE) {
+			result->failure = TETRIS_CCCI_BAD_DESCRIPTOR_SIZE;
+			return -EINVAL;
+		}
+		desc->base = get_unaligned_le64(raw);
+		desc->size = get_unaligned_le32(raw + 8);
+		desc->count = get_unaligned_le32(raw + 12);
+		desc->version = 1;
+	} else {
+		if (len != TETRIS_CCCI_V2_DESC_SIZE) {
+			result->failure = TETRIS_CCCI_BAD_DESCRIPTOR_SIZE;
+			return -EINVAL;
+		}
+		desc->base = get_unaligned_le64(raw);
+		desc->size = get_unaligned_le32(raw + 8);
+		desc->version = get_unaligned_le32(raw + 16);
+		desc->count = get_unaligned_le32(raw + 20);
+	}
+
+	result->version = desc->version;
+	result->size = desc->size;
+	result->count = desc->count;
+	if (!desc->base || !desc->size || desc->size > TETRIS_CCCI_MAX_INFO_SIZE ||
+	    !desc->version || desc->version > 0x7fffffffU) {
+		result->failure = TETRIS_CCCI_BAD_DESCRIPTOR;
+		return -EINVAL;
+	}
+	if (desc->base > UINT64_MAX - desc->size) {
+		result->failure = TETRIS_CCCI_RANGE_OVERFLOW;
+		return -EOVERFLOW;
+	}
+	if (!desc->count || desc->count > TETRIS_CCCI_MAX_TAGS) {
+		result->failure = TETRIS_CCCI_BAD_TAG_COUNT;
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static bool tetris_ccci_check_core_size(u32 bit, u32 size)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(tetris_ccci_core_tags); i++) {
+		const struct tetris_ccci_core_tag *core =
+			&tetris_ccci_core_tags[i];
+
+		if (core->bit != bit)
+			continue;
+		if (core->exact_size)
+			return size == core->exact_size;
+		if (!size || (core->max_size && size > core->max_size) ||
+		    (core->size_multiple && size % core->size_multiple))
+			return false;
+		if (bit == TETRIS_CCCI_CORE_MD_CHECK)
+			return size == 188 || size == 344 || size == 512;
+		return true;
+	}
+
+	return true;
+}
+
+static u32 tetris_ccci_core_bit(const char *name)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(tetris_ccci_core_tags); i++)
+		if (!strcmp(name, tetris_ccci_core_tags[i].name))
+			return tetris_ccci_core_tags[i].bit;
+
+	return 0;
+}
+
+static int tetris_ccci_validate_tags(const u8 *buffer,
+				     const struct tetris_ccci_descriptor *desc,
+				     struct tetris_ccci_result *result)
+{
+	u32 header_size, name_size, offset = 0, seen = 0;
+	static u32 visited[TETRIS_CCCI_MAX_TAGS];
+	unsigned int i, j;
+
+	if (desc->version >= 2) {
+		header_size = TETRIS_CCCI_V2_TAG_SIZE;
+		name_size = TETRIS_CCCI_V2_NAME_SIZE;
+	} else {
+		header_size = TETRIS_CCCI_V1_TAG_SIZE;
+		name_size = TETRIS_CCCI_V1_NAME_SIZE;
+	}
+	if (desc->count > desc->size / header_size) {
+		result->failure = TETRIS_CCCI_BAD_TAG_COUNT;
+		return -EINVAL;
+	}
+
+	for (i = 0; i < desc->count; i++) {
+		const u8 *header;
+		const char *nul;
+		char name[TETRIS_CCCI_V2_NAME_SIZE];
+		u32 bit, data_offset, data_size, next_offset;
+
+		for (j = 0; j < i; j++) {
+			if (visited[j] == offset) {
+				result->failure = TETRIS_CCCI_TAG_CYCLE;
+				return -EINVAL;
+			}
+		}
+		visited[i] = offset;
+		if (offset > desc->size || header_size > desc->size - offset) {
+			result->failure = TETRIS_CCCI_BAD_TAG_HEADER;
+			return -EINVAL;
+		}
+
+		header = buffer + offset;
+		nul = memchr(header, '\0', name_size);
+		if (!nul || nul == (const char *)header) {
+			result->failure = TETRIS_CCCI_BAD_TAG_NAME;
+			return -EINVAL;
+		}
+		memcpy(name, header, nul - (const char *)header);
+		name[nul - (const char *)header] = '\0';
+		data_offset = get_unaligned_le32(header + name_size);
+		data_size = get_unaligned_le32(header + name_size + 4);
+		next_offset = get_unaligned_le32(header + name_size + 8);
+		if (data_offset > desc->size || data_size > desc->size - data_offset) {
+			result->failure = TETRIS_CCCI_BAD_TAG_DATA;
+			return -EINVAL;
+		}
+
+		bit = tetris_ccci_core_bit(name);
+		if (bit) {
+			if (seen & bit) {
+				result->failure = TETRIS_CCCI_DUPLICATE_CORE_TAG;
+				return -EINVAL;
+			}
+			if (!tetris_ccci_check_core_size(bit, data_size)) {
+				result->failure = TETRIS_CCCI_BAD_TAG_DATA;
+				return -EINVAL;
+			}
+			seen |= bit;
+		}
+
+		if (i + 1 == desc->count) {
+			if (next_offset) {
+				result->failure = TETRIS_CCCI_TAG_COUNT_MISMATCH;
+				return -EINVAL;
+			}
+		} else if (!next_offset) {
+			result->failure = TETRIS_CCCI_TAG_COUNT_MISMATCH;
+			return -EINVAL;
+		}
+		offset = next_offset;
+	}
+
+	result->known_tags = seen;
+	return 0;
+}
+
+static int tetris_ccci_observe(const void *fdt,
+			       const struct tetris_ccci_access *access,
+			       struct tetris_ccci_result *result)
+{
+	struct tetris_ccci_descriptor desc = { 0 };
+	const void *buffer;
+	int ret;
+
+	memset(result, 0, sizeof(*result));
+	ret = tetris_ccci_read_descriptor(fdt, &desc, result);
+	if (ret)
+		return ret;
+	if (!tetris_ccci_buffer_reserved(fdt, desc.base, desc.size)) {
+		result->failure = TETRIS_CCCI_NOT_RESERVED;
+		return -EPERM;
+	}
+	if (!tetris_ccci_buffer_in_lk_memory(fdt, desc.base, desc.size) ||
+	    !access || !access->range_allowed ||
+	    !access->range_allowed(desc.base, desc.size, access->context)) {
+		result->failure = TETRIS_CCCI_NOT_DRAM;
+		return -ERANGE;
+	}
+	if (!access->map) {
+		result->failure = TETRIS_CCCI_MAP_FAILED;
+		return -EFAULT;
+	}
+
+	buffer = access->map(desc.base, desc.size, access->context);
+	if (!buffer) {
+		result->failure = TETRIS_CCCI_MAP_FAILED;
+		return -EFAULT;
+	}
+	ret = tetris_ccci_validate_tags(buffer, &desc, result);
+	if (access->unmap)
+		access->unmap(buffer, access->context);
+	if (ret)
+		return ret;
+
+	result->failure = TETRIS_CCCI_OK;
+	return 0;
+}
+
+static int tetris_ccci_publish_status(void *fdt,
+				      const struct tetris_ccci_result *result)
+{
+	const char *failure, *observation;
+	int chosen, node, ret;
+
+	chosen = fdt_path_offset(fdt, "/chosen");
+	if (chosen < 0)
+		return chosen;
+	node = fdt_subnode_offset(fdt, chosen, "nothing,ccci-handoff-status");
+	if (node >= 0) {
+		ret = fdt_del_node(fdt, node);
+		if (ret)
+			return ret;
+	} else if (node != -FDT_ERR_NOTFOUND) {
+		return node;
+	}
+	node = fdt_add_subnode(fdt, chosen, "nothing,ccci-handoff-status");
+	if (node < 0)
+		return node;
+
+	failure = result->failure < ARRAY_SIZE(tetris_ccci_failure_names) ?
+		tetris_ccci_failure_names[result->failure] : "unknown";
+	observation = result->failure == TETRIS_CCCI_OK ?
+		"structure-valid" : "invalid";
+	ret = fdt_setprop_u32(fdt, node, "version", result->version);
+	if (!ret)
+		ret = fdt_setprop_u32(fdt, node, "size", result->size);
+	if (!ret)
+		ret = fdt_setprop_u32(fdt, node, "count", result->count);
+	if (!ret)
+		ret = fdt_setprop_u32(fdt, node, "known-tag-mask",
+				      result->known_tags);
+	if (!ret)
+		ret = fdt_setprop_u32(fdt, node, "failure-code", result->failure);
+	if (!ret)
+		ret = fdt_setprop_string(fdt, node, "failure", failure);
+	if (!ret)
+		ret = fdt_setprop_string(fdt, node, "observation-status",
+					 observation);
+	if (result->failure == TETRIS_CCCI_OK)
+		if (!ret)
+			ret = fdt_setprop(fdt, node, "structure-validated", NULL, 0);
+	if (!ret)
+		return 0;
+
+	fdt_del_node(fdt, node);
+	return ret;
+}
+
+#ifndef TETRIS_CCCI_HANDOFF_HOST_TEST
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -273,6 +843,74 @@ static int tetris_handoff_devinfo(void *fdt)
 	return 0;
 }
 
+static bool tetris_ccci_in_uboot_dram(u64 base, u32 size, void *context)
+{
+	const struct bd_info *bd = gd->bd;
+	phys_addr_t phys = (phys_addr_t)base;
+	unsigned int i;
+
+	(void)context;
+	if ((u64)phys != base)
+		return false;
+
+	for (i = 0; i < CONFIG_NR_DRAM_BANKS; i++) {
+		if (tetris_ccci_range_contains(bd->bi_dram[i].start,
+					       bd->bi_dram[i].size, base, size))
+			return true;
+	}
+
+	return false;
+}
+
+static const void *tetris_ccci_map(u64 base, u32 size, void *context)
+{
+	(void)context;
+	return map_sysmem((phys_addr_t)base, size);
+}
+
+static void tetris_ccci_unmap(const void *buffer, void *context)
+{
+	(void)context;
+	unmap_sysmem(buffer);
+}
+
+static int tetris_observe_ccci_handoff(void *fdt)
+{
+	const struct tetris_ccci_access access = {
+		.range_allowed = tetris_ccci_in_uboot_dram,
+		.map = tetris_ccci_map,
+		.unmap = tetris_ccci_unmap,
+	};
+	struct tetris_ccci_result result = {
+		.failure = TETRIS_CCCI_NO_FDT,
+	};
+	const void *prev_fdt = NULL;
+	const char *failure;
+	ulong prev_fdt_addr;
+	int publish_ret, ret;
+
+	prev_fdt_addr = env_get_hex("prevbl_fdt_addr", 0);
+	if (prev_fdt_addr)
+		prev_fdt = (const void *)prev_fdt_addr;
+	if (!prev_fdt || fdt_check_header(prev_fdt))
+		ret = -ENODATA;
+	else
+		ret = tetris_ccci_observe(prev_fdt, &access, &result);
+
+	publish_ret = tetris_ccci_publish_status(fdt, &result);
+	if (publish_ret)
+		printf("Tetris: CCCI status publication failed: %d\n",
+		       publish_ret);
+
+	failure = result.failure < ARRAY_SIZE(tetris_ccci_failure_names) ?
+		tetris_ccci_failure_names[result.failure] : "unknown";
+	printf("Tetris: CCCI structure %s: v%u size=%u tags=%u known=%x failure=%s\n",
+	       ret ? "invalid" : "valid", result.version, result.size,
+	       result.count, result.known_tags, failure);
+
+	return ret;
+}
+
 void board_prep_linux(struct bootm_headers *images)
 {
 	int ret;
@@ -281,6 +919,9 @@ void board_prep_linux(struct bootm_headers *images)
 	ret = tetris_handoff_devinfo(fdt);
 	if (ret)
 		printf("Tetris: LK devinfo handoff unavailable: %d\n", ret);
+
+	/* Observation only: validation failure must not alter the boot path. */
+	tetris_observe_ccci_handoff(fdt);
 
 	ret = tetris_prepare_connsys_emi(fdt);
 	if (ret)
@@ -356,3 +997,4 @@ void fastboot_oem_board(char *cmd_parameter, void *data, u32 size, char *respons
 		fastboot_fail("unknown oem_board command", response);
 	}
 }
+#endif /* !TETRIS_CCCI_HANDOFF_HOST_TEST */

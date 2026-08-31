@@ -51,6 +51,10 @@ jobs:
           . .venv/bin/activate
           make mt6878_tetris_defconfig
 
+      - name: Test bounded LK CCCI handoff observation
+        run: |
+          .github/tests/run_tetris_ccci_handoff.sh
+
       - name: Build
         run: |
           . .venv/bin/activate
@@ -145,6 +149,51 @@ jobs:
           ):
               if record not in handler:
                   raise SystemExit(f"missing validated LK devinfo handoff: {record}")
+
+          for record in (
+              'fdt_node_offset_by_compatible(fdt, -1, "mediatek,mddriver")',
+              '"ccci,modem_info_v2"',
+              '"ccci,modem_info"',
+              'tetris_ccci_buffer_reserved(fdt, desc.base, desc.size)',
+              'tetris_ccci_buffer_in_lk_memory(fdt, desc.base, desc.size)',
+              'access->range_allowed(desc.base, desc.size, access->context)',
+              'tetris_ccci_validate_tags(buffer, &desc, result)',
+              '"nothing,ccci-handoff-status"',
+              '"observation-status"',
+              '"structure-validated"',
+              'tetris_ccci_in_uboot_dram',
+              'tetris_observe_ccci_handoff(fdt)',
+          ):
+              if record not in handler:
+                  raise SystemExit(f"missing bounded LK CCCI observation: {record}")
+          if "MTK_SIP_KERNEL_CCCI_CONTROL" in handler:
+              raise SystemExit("CCCI observation must not invoke the CCCI SMC ABI")
+          if '"runtime-ready"' in handler or '"validated"' in handler:
+              raise SystemExit("structure observation must not claim modem readiness")
+          ccci_runtime = handler[
+              handler.index("static const void *tetris_ccci_map"):
+              handler.index("void board_prep_linux")
+          ]
+          for forbidden in (
+              "arm_smccc_smc(",
+              "readl(",
+              "writel(",
+              "regulator_",
+              "clk_",
+              "reset_",
+              "request_irq(",
+              "dma_",
+              "scp_",
+          ):
+              if forbidden in ccci_runtime:
+                  raise SystemExit(
+                      f"CCCI observation gained a hardware side effect: {forbidden}"
+                  )
+          if handler.index("tetris_observe_ccci_handoff(fdt)") > handler.index(
+              "tetris_prepare_connsys_emi(fdt)",
+              handler.index("void board_prep_linux"),
+          ):
+              raise SystemExit("CCCI observation moved after active boot preparation")
 
           for record in (
               "#define TETRIS_WDT_BASE\t\t\t0x1c00a000UL",
