@@ -11,6 +11,7 @@
 #include <fdtdec.h>
 #include <init.h>
 #include <asm/global_data.h>
+#include <asm/io.h>
 #include <asm/system.h>
 #include <linux/arm-smccc.h>
 #include <linux/libfdt.h>
@@ -35,6 +36,11 @@ DECLARE_GLOBAL_DATA_PTR;
 #define TETRIS_MD_CONNSYS_EMI_SIZE	0x00d80000ULL
 #define TETRIS_DEVINFO_MAX_WORDS	400
 
+#define TETRIS_WDT_BASE			0x1c00a000UL
+#define TETRIS_WDT_NONRST_REG2		0x24
+#define TETRIS_REBOOT_MODE_MASK		0xf
+#define TETRIS_REBOOT_MODE_BOOTLOADER	0x3
+
 struct tetris_devinfo_tag {
 	u32 data_size;
 	u32 data[];
@@ -46,6 +52,23 @@ struct tetris_emimpu_region {
 	unsigned long id;
 	const char *name;
 };
+
+int board_late_init(void)
+{
+	void __iomem *reboot_mode = (void __iomem *)(TETRIS_WDT_BASE +
+						      TETRIS_WDT_NONRST_REG2);
+	u32 mode = readl(reboot_mode) & TETRIS_REBOOT_MODE_MASK;
+
+	if (mode != TETRIS_REBOOT_MODE_BOOTLOADER)
+		return 0;
+
+	/* Consume the request once so a later reset cannot loop into fastboot. */
+	clrbits_le32(reboot_mode, TETRIS_REBOOT_MODE_MASK);
+	readl(reboot_mode);
+
+	printf("Tetris: Linux requested U-Boot fastboot\n");
+	return env_set("bootcmd", "run fastboot");
+}
 
 static const struct tetris_emimpu_region tetris_connsys_emimpu_regions[] = {
 	{ 0x85e00000ULL, 0x86480000ULL, 0x2c, "conninfra RO" },

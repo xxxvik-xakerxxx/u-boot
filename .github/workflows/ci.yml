@@ -132,6 +132,7 @@ jobs:
               "CONFIG_DM_KEYBOARD=y",
               "CONFIG_BUTTON_KEYBOARD=y",
               "CONFIG_SAVE_PREV_BL_FDT_ADDR=y",
+              "CONFIG_BOARD_LATE_INIT=y",
           ):
               if symbol not in config.splitlines():
                   raise SystemExit(f"missing Tetris button config: {symbol}")
@@ -144,6 +145,27 @@ jobs:
           ):
               if record not in handler:
                   raise SystemExit(f"missing validated LK devinfo handoff: {record}")
+
+          for record in (
+              "#define TETRIS_WDT_BASE\t\t\t0x1c00a000UL",
+              "#define TETRIS_WDT_NONRST_REG2\t\t0x24",
+              "#define TETRIS_REBOOT_MODE_MASK\t\t0xf",
+              "#define TETRIS_REBOOT_MODE_BOOTLOADER\t0x3",
+              "readl(reboot_mode) & TETRIS_REBOOT_MODE_MASK",
+              "clrbits_le32(reboot_mode, TETRIS_REBOOT_MODE_MASK)",
+              'env_set("bootcmd", "run fastboot")',
+          ):
+              if record not in handler:
+                  raise SystemExit(f"missing Linux reboot-to-fastboot handoff: {record}")
+
+          soc_dts = Path("arch/arm/dts/mt6878.dtsi").read_text()
+          for record in (
+              "offset = <0x24>;",
+              "mask = <0xf>;",
+              "mode-bootloader = <0x3>;",
+          ):
+              if record not in soc_dts:
+                  raise SystemExit(f"reboot-mode DT contract changed: {record}")
 
           prevbl = Path("arch/arm/lib/save_prev_bl_data.c").read_text()
           for record in (
