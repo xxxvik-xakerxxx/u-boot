@@ -60,6 +60,20 @@ static u64 tetris_test_get_le64(const void *ptr)
 #define TETRIS_CCCI_V2_NAME_SIZE	64U
 #define TETRIS_CCCI_V1_TAG_SIZE		28U
 #define TETRIS_CCCI_V2_TAG_SIZE		76U
+/*
+ * LK payload ABI from Nothing OS 4.1 Tetris B4.1 device modules commit
+ * ee2be53cb75670b548948636a0db1d1ff112bf12. Keep parsing byte-oriented.
+ */
+#define TETRIS_CCCI_MODEM_INFO_SIZE	24U
+#define TETRIS_CCCI_MD_MEM_BLOCK_SIZE	24U
+#define TETRIS_CCCI_SMEM_LAYOUT_SIZE	40U
+#define TETRIS_CCCI_SMEM_REGION_SIZE	40U
+#define TETRIS_CCCI_MD_CHECK_V2_SIZE	188U
+#define TETRIS_CCCI_MD_CHECK_V5_SIZE	344U
+#define TETRIS_CCCI_MD_CHECK_V6_SIZE	512U
+#define TETRIS_CCCI_MD_CHECK_MAGIC	"CHECK_HEADER"
+#define TETRIS_CCCI_MD_CHECK_MAGIC_SIZE	12U
+#define TETRIS_CCCI_MD_TYPE_MAX		14U
 #define TETRIS_CCCI_MAX_TAGS \
 	(TETRIS_CCCI_MAX_INFO_SIZE / TETRIS_CCCI_V1_TAG_SIZE)
 
@@ -71,6 +85,34 @@ static u64 tetris_test_get_le64(const void *ptr)
 #define TETRIS_CCCI_CORE_SMEM_LAYOUT	BIT(5)
 #define TETRIS_CCCI_CORE_NC_SMEM		BIT(6)
 #define TETRIS_CCCI_CORE_PHY_CAP		BIT(7)
+#define TETRIS_CCCI_CORE_NC_LAYOUT_NUM	BIT(8)
+#define TETRIS_CCCI_CORE_C_LAYOUT_NUM	BIT(9)
+#define TETRIS_CCCI_CORE_NC_LAYOUT	BIT(10)
+#define TETRIS_CCCI_CORE_C_LAYOUT	BIT(11)
+#define TETRIS_CCCI_REQUIRED_PAYLOAD \
+	(TETRIS_CCCI_CORE_HDR_COUNT | TETRIS_CCCI_CORE_HDR_TABLE | \
+	 TETRIS_CCCI_CORE_MD_LAYOUT | TETRIS_CCCI_CORE_MD_CHECK | \
+	 TETRIS_CCCI_CORE_MD_IMAGE | TETRIS_CCCI_CORE_SMEM_LAYOUT)
+#define TETRIS_CCCI_DIRECT_SMEM_TAGS \
+	(TETRIS_CCCI_CORE_NC_LAYOUT_NUM | TETRIS_CCCI_CORE_C_LAYOUT_NUM | \
+	 TETRIS_CCCI_CORE_NC_LAYOUT | TETRIS_CCCI_CORE_C_LAYOUT)
+
+enum tetris_ccci_tag_id {
+	TETRIS_CCCI_TAG_HDR_COUNT,
+	TETRIS_CCCI_TAG_HDR_TABLE,
+	TETRIS_CCCI_TAG_MD_LAYOUT,
+	TETRIS_CCCI_TAG_MD_CHECK,
+	TETRIS_CCCI_TAG_MD_IMAGE,
+	TETRIS_CCCI_TAG_SMEM_LAYOUT,
+	TETRIS_CCCI_TAG_NC_SMEM,
+	TETRIS_CCCI_TAG_PHY_CAP,
+	TETRIS_CCCI_TAG_NC_LAYOUT_NUM,
+	TETRIS_CCCI_TAG_C_LAYOUT_NUM,
+	TETRIS_CCCI_TAG_NC_LAYOUT,
+	TETRIS_CCCI_TAG_C_LAYOUT,
+	TETRIS_CCCI_TAG_COUNT,
+};
+
 enum tetris_ccci_failure {
 	TETRIS_CCCI_OK,
 	TETRIS_CCCI_NO_FDT,
@@ -89,6 +131,18 @@ enum tetris_ccci_failure {
 	TETRIS_CCCI_TAG_CYCLE,
 	TETRIS_CCCI_TAG_COUNT_MISMATCH,
 	TETRIS_CCCI_DUPLICATE_CORE_TAG,
+	TETRIS_CCCI_BAD_DESCRIPTOR_STATUS,
+	TETRIS_CCCI_UNSUPPORTED_DESCRIPTOR_VERSION,
+	TETRIS_CCCI_MISSING_PAYLOAD_TAG,
+	TETRIS_CCCI_BAD_HDR_COUNT,
+	TETRIS_CCCI_BAD_MODEM_INFO,
+	TETRIS_CCCI_BAD_MD_RANGE,
+	TETRIS_CCCI_BAD_MD_LAYOUT,
+	TETRIS_CCCI_BAD_CHECK_HEADER,
+	TETRIS_CCCI_BAD_IMAGE_SIZE,
+	TETRIS_CCCI_BAD_SMEM_LAYOUT,
+	TETRIS_CCCI_BAD_SMEM_TAG_SET,
+	TETRIS_CCCI_BAD_SMEM_TABLE,
 };
 
 struct tetris_ccci_result {
@@ -96,6 +150,15 @@ struct tetris_ccci_result {
 	u32 size;
 	u32 count;
 	u32 known_tags;
+	u32 payload_valid_mask;
+	u32 md_id;
+	u32 md_type;
+	u32 md_check_header_version;
+	u32 md_image_size;
+	u32 md_memory_size;
+	u32 smem_total_size;
+	bool structure_valid;
+	bool payload_valid;
 	enum tetris_ccci_failure failure;
 };
 
@@ -104,6 +167,9 @@ struct tetris_ccci_descriptor {
 	u32 size;
 	u32 count;
 	u32 version;
+	u32 err_no;
+	u32 load_flag;
+	u32 load_md_errno;
 };
 
 struct tetris_ccci_access {
@@ -115,21 +181,45 @@ struct tetris_ccci_access {
 
 struct tetris_ccci_core_tag {
 	const char *name;
+	enum tetris_ccci_tag_id id;
 	u32 bit;
 	u32 exact_size;
 	u32 size_multiple;
 	u32 max_size;
 };
 
+struct tetris_ccci_tag_data {
+	const u8 *data;
+	u32 size;
+};
+
 static const struct tetris_ccci_core_tag tetris_ccci_core_tags[] = {
-	{ "hdr_count", TETRIS_CCCI_CORE_HDR_COUNT, 4, 0, 0 },
-	{ "hdr_tbl_inf", TETRIS_CCCI_CORE_HDR_TABLE, 24, 0, 0 },
-	{ "md_mem_layout", TETRIS_CCCI_CORE_MD_LAYOUT, 0, 24, 1024 },
-	{ "md1_chk", TETRIS_CCCI_CORE_MD_CHECK, 0, 0, 512 },
-	{ "md1img", TETRIS_CCCI_CORE_MD_IMAGE, 4, 0, 0 },
-	{ "smem_layout", TETRIS_CCCI_CORE_SMEM_LAYOUT, 40, 0, 0 },
-	{ "nc_smem_info_ext", TETRIS_CCCI_CORE_NC_SMEM, 0, 16, 0 },
-	{ "md1_phy_cap", TETRIS_CCCI_CORE_PHY_CAP, 4, 0, 0 },
+	{ "hdr_count", TETRIS_CCCI_TAG_HDR_COUNT,
+	  TETRIS_CCCI_CORE_HDR_COUNT, 4, 0, 0 },
+	{ "hdr_tbl_inf", TETRIS_CCCI_TAG_HDR_TABLE,
+	  TETRIS_CCCI_CORE_HDR_TABLE, TETRIS_CCCI_MODEM_INFO_SIZE, 0, 0 },
+	{ "md_mem_layout", TETRIS_CCCI_TAG_MD_LAYOUT,
+	  TETRIS_CCCI_CORE_MD_LAYOUT, 0, TETRIS_CCCI_MD_MEM_BLOCK_SIZE, 1024 },
+	{ "md1_chk", TETRIS_CCCI_TAG_MD_CHECK,
+	  TETRIS_CCCI_CORE_MD_CHECK, 0, 0, TETRIS_CCCI_MD_CHECK_V6_SIZE },
+	{ "md1img", TETRIS_CCCI_TAG_MD_IMAGE,
+	  TETRIS_CCCI_CORE_MD_IMAGE, 4, 0, 0 },
+	{ "smem_layout", TETRIS_CCCI_TAG_SMEM_LAYOUT,
+	  TETRIS_CCCI_CORE_SMEM_LAYOUT, TETRIS_CCCI_SMEM_LAYOUT_SIZE, 0, 0 },
+	{ "nc_smem_info_ext", TETRIS_CCCI_TAG_NC_SMEM,
+	  TETRIS_CCCI_CORE_NC_SMEM, 0, 16, 0 },
+	{ "md1_phy_cap", TETRIS_CCCI_TAG_PHY_CAP,
+	  TETRIS_CCCI_CORE_PHY_CAP, 4, 0, 0 },
+	{ "nc_smem_layout_num", TETRIS_CCCI_TAG_NC_LAYOUT_NUM,
+	  TETRIS_CCCI_CORE_NC_LAYOUT_NUM, 4, 0, 0 },
+	{ "c_smem_layout_num", TETRIS_CCCI_TAG_C_LAYOUT_NUM,
+	  TETRIS_CCCI_CORE_C_LAYOUT_NUM, 4, 0, 0 },
+	{ "nc_smem_layout", TETRIS_CCCI_TAG_NC_LAYOUT,
+	  TETRIS_CCCI_CORE_NC_LAYOUT, 0, TETRIS_CCCI_SMEM_REGION_SIZE,
+	  TETRIS_CCCI_MAX_INFO_SIZE },
+	{ "c_smem_layout", TETRIS_CCCI_TAG_C_LAYOUT,
+	  TETRIS_CCCI_CORE_C_LAYOUT, 0, TETRIS_CCCI_SMEM_REGION_SIZE,
+	  TETRIS_CCCI_MAX_INFO_SIZE },
 };
 
 static const char *const tetris_ccci_failure_names[] = {
@@ -150,6 +240,18 @@ static const char *const tetris_ccci_failure_names[] = {
 	[TETRIS_CCCI_TAG_CYCLE] = "tag-cycle",
 	[TETRIS_CCCI_TAG_COUNT_MISMATCH] = "tag-count-mismatch",
 	[TETRIS_CCCI_DUPLICATE_CORE_TAG] = "duplicate-core-tag",
+	[TETRIS_CCCI_BAD_DESCRIPTOR_STATUS] = "bad-descriptor-status",
+	[TETRIS_CCCI_UNSUPPORTED_DESCRIPTOR_VERSION] = "unsupported-descriptor-version",
+	[TETRIS_CCCI_MISSING_PAYLOAD_TAG] = "missing-payload-tag",
+	[TETRIS_CCCI_BAD_HDR_COUNT] = "bad-hdr-count",
+	[TETRIS_CCCI_BAD_MODEM_INFO] = "bad-modem-info",
+	[TETRIS_CCCI_BAD_MD_RANGE] = "bad-md-range",
+	[TETRIS_CCCI_BAD_MD_LAYOUT] = "bad-md-layout",
+	[TETRIS_CCCI_BAD_CHECK_HEADER] = "bad-check-header",
+	[TETRIS_CCCI_BAD_IMAGE_SIZE] = "bad-image-size",
+	[TETRIS_CCCI_BAD_SMEM_LAYOUT] = "bad-smem-layout",
+	[TETRIS_CCCI_BAD_SMEM_TAG_SET] = "bad-smem-tag-set",
+	[TETRIS_CCCI_BAD_SMEM_TABLE] = "bad-smem-table",
 };
 
 static bool tetris_ccci_range_end(u64 base, u64 size, u64 *end)
@@ -352,8 +454,11 @@ static int tetris_ccci_read_descriptor(const void *fdt,
 		}
 		desc->base = get_unaligned_le64(raw);
 		desc->size = get_unaligned_le32(raw + 8);
+		desc->err_no = get_unaligned_le32(raw + 12);
 		desc->version = get_unaligned_le32(raw + 16);
 		desc->count = get_unaligned_le32(raw + 20);
+		desc->load_flag = get_unaligned_le32(raw + 24);
+		desc->load_md_errno = get_unaligned_le32(raw + 28);
 	}
 
 	result->version = desc->version;
@@ -371,6 +476,15 @@ static int tetris_ccci_read_descriptor(const void *fdt,
 	if (!desc->count || desc->count > TETRIS_CCCI_MAX_TAGS) {
 		result->failure = TETRIS_CCCI_BAD_TAG_COUNT;
 		return -EINVAL;
+	}
+	if (desc->version >= 2 &&
+	    (desc->err_no || desc->load_md_errno)) {
+		result->failure = TETRIS_CCCI_BAD_DESCRIPTOR_STATUS;
+		return -EINVAL;
+	}
+	if (desc->version > 3) {
+		result->failure = TETRIS_CCCI_UNSUPPORTED_DESCRIPTOR_VERSION;
+		return -EPROTONOSUPPORT;
 	}
 
 	return 0;
@@ -412,7 +526,8 @@ static u32 tetris_ccci_core_bit(const char *name)
 
 static int tetris_ccci_validate_tags(const u8 *buffer,
 				     const struct tetris_ccci_descriptor *desc,
-				     struct tetris_ccci_result *result)
+				     struct tetris_ccci_result *result,
+				     struct tetris_ccci_tag_data tags[])
 {
 	u32 header_size, name_size, offset = 0, seen = 0;
 	static u32 visited[TETRIS_CCCI_MAX_TAGS];
@@ -466,6 +581,9 @@ static int tetris_ccci_validate_tags(const u8 *buffer,
 
 		bit = tetris_ccci_core_bit(name);
 		if (bit) {
+			const struct tetris_ccci_core_tag *core = NULL;
+			unsigned int core_index;
+
 			if (seen & bit) {
 				result->failure = TETRIS_CCCI_DUPLICATE_CORE_TAG;
 				return -EINVAL;
@@ -474,6 +592,18 @@ static int tetris_ccci_validate_tags(const u8 *buffer,
 				result->failure = TETRIS_CCCI_BAD_TAG_DATA;
 				return -EINVAL;
 			}
+			for (core_index = 0;
+			     core_index < ARRAY_SIZE(tetris_ccci_core_tags);
+			     core_index++) {
+				if (tetris_ccci_core_tags[core_index].bit == bit) {
+					core = &tetris_ccci_core_tags[core_index];
+					break;
+				}
+			}
+			if (!core)
+				return -EINVAL;
+			tags[core->id].data = buffer + data_offset;
+			tags[core->id].size = data_size;
 			seen |= bit;
 		}
 
@@ -493,11 +623,332 @@ static int tetris_ccci_validate_tags(const u8 *buffer,
 	return 0;
 }
 
+static bool tetris_ccci_ranges_overlap(u64 first_base, u64 first_size,
+				       u64 second_base, u64 second_size)
+{
+	u64 first_end, second_end;
+
+	if (!tetris_ccci_range_end(first_base, first_size, &first_end) ||
+	    !tetris_ccci_range_end(second_base, second_size, &second_end))
+		return true;
+
+	return first_base < second_end && second_base < first_end;
+}
+
+static bool tetris_ccci_payload_range_allowed(const void *fdt,
+					      const struct tetris_ccci_access *access,
+					      u64 base, u32 size)
+{
+	return tetris_ccci_buffer_reserved(fdt, base, size) &&
+	       tetris_ccci_buffer_in_lk_memory(fdt, base, size) &&
+	       access && access->range_allowed &&
+	       access->range_allowed(base, size, access->context);
+}
+
+static int tetris_ccci_validate_md_layout(const struct tetris_ccci_tag_data *layout,
+					  u64 md_base, u32 md_size,
+					  struct tetris_ccci_result *result)
+{
+	u32 count = layout->size / TETRIS_CCCI_MD_MEM_BLOCK_SIZE;
+	unsigned int i, j;
+
+	if (!count) {
+		result->failure = TETRIS_CCCI_BAD_MD_LAYOUT;
+		return -EINVAL;
+	}
+
+	for (i = 0; i < count; i++) {
+		const u8 *entry = layout->data +
+			i * TETRIS_CCCI_MD_MEM_BLOCK_SIZE;
+		u32 offset = get_unaligned_le32(entry);
+		u32 size = get_unaligned_le32(entry + 4);
+		u64 ap_phy = get_unaligned_le64(entry + 16);
+		u64 expected;
+
+		if (!size || offset > md_size || size > md_size - offset ||
+		    md_base > UINT64_MAX - offset) {
+			result->failure = TETRIS_CCCI_BAD_MD_LAYOUT;
+			return -ERANGE;
+		}
+		expected = md_base + offset;
+		if (ap_phy != expected ||
+		    !tetris_ccci_range_contains(md_base, md_size, ap_phy, size)) {
+			result->failure = TETRIS_CCCI_BAD_MD_LAYOUT;
+			return -EINVAL;
+		}
+
+		for (j = 0; j < i; j++) {
+			const u8 *previous = layout->data +
+				j * TETRIS_CCCI_MD_MEM_BLOCK_SIZE;
+			u32 previous_offset = get_unaligned_le32(previous);
+			u32 previous_size = get_unaligned_le32(previous + 4);
+
+			if (tetris_ccci_ranges_overlap(offset, size,
+						       previous_offset,
+						       previous_size)) {
+				result->failure = TETRIS_CCCI_BAD_MD_LAYOUT;
+				return -EINVAL;
+			}
+		}
+	}
+
+	result->payload_valid_mask |= TETRIS_CCCI_CORE_MD_LAYOUT;
+	return 0;
+}
+
+static int tetris_ccci_validate_check_header(const struct tetris_ccci_tag_data *check,
+					     u32 md_type, u32 md_size,
+					     struct tetris_ccci_result *result)
+{
+	const u8 *data = check->data;
+	u32 header_version = get_unaligned_le32(data + 12);
+	u32 product_version = get_unaligned_le32(data + 16);
+	u32 image_type = get_unaligned_le32(data + 20);
+	u32 memory_size = get_unaligned_le32(data + 172);
+	u32 image_size = get_unaligned_le32(data + 176);
+	u32 declared_size = get_unaligned_le32(data + check->size - 4);
+	bool version_valid;
+
+	if (check->size == TETRIS_CCCI_MD_CHECK_V2_SIZE)
+		version_valid = header_version == 1 || header_version == 2;
+	else if (check->size == TETRIS_CCCI_MD_CHECK_V5_SIZE)
+		version_valid = header_version == 5;
+	else
+		version_valid = header_version == 6;
+
+	if (memcmp(data, TETRIS_CCCI_MD_CHECK_MAGIC,
+		   TETRIS_CCCI_MD_CHECK_MAGIC_SIZE) ||
+	    !version_valid || !product_version || product_version > 2 ||
+	    !image_type || image_type > TETRIS_CCCI_MD_TYPE_MAX ||
+	    image_type != md_type || data[168] != 1 ||
+	    declared_size != check->size) {
+		result->failure = TETRIS_CCCI_BAD_CHECK_HEADER;
+		return -EINVAL;
+	}
+	if (!memory_size || memory_size > md_size || !image_size ||
+	    image_size > memory_size) {
+		result->failure = TETRIS_CCCI_BAD_IMAGE_SIZE;
+		return -ERANGE;
+	}
+
+	result->md_check_header_version = header_version;
+	result->md_image_size = image_size;
+	result->md_memory_size = memory_size;
+	result->payload_valid_mask |= TETRIS_CCCI_CORE_MD_CHECK;
+	return 0;
+}
+
+static int tetris_ccci_validate_smem_layout(const void *fdt,
+					    const struct tetris_ccci_access *access,
+					    const struct tetris_ccci_tag_data *layout,
+					    u64 md_base, u32 md_size,
+					    struct tetris_ccci_result *result)
+{
+	const u8 *data = layout->data;
+	u64 base = get_unaligned_le64(data);
+	u32 total_size = get_unaligned_le32(data + 36);
+	unsigned int i;
+
+	if (!base || !total_size || !get_unaligned_le32(data + 12) ||
+	    !tetris_ccci_payload_range_allowed(fdt, access, base, total_size) ||
+	    tetris_ccci_ranges_overlap(base, total_size, md_base, md_size)) {
+		result->failure = TETRIS_CCCI_BAD_SMEM_LAYOUT;
+		return -ERANGE;
+	}
+
+	for (i = 0; i < 3; i++) {
+		u32 offset = get_unaligned_le32(data + 8 + i * 8);
+		u32 size = get_unaligned_le32(data + 12 + i * 8);
+
+		if (offset > total_size || size > total_size - offset) {
+			result->failure = TETRIS_CCCI_BAD_SMEM_LAYOUT;
+			return -ERANGE;
+		}
+	}
+
+	result->smem_total_size = total_size;
+	result->payload_valid_mask |= TETRIS_CCCI_CORE_SMEM_LAYOUT;
+	return 0;
+}
+
+static int tetris_ccci_validate_smem_table(const void *fdt,
+					   const struct tetris_ccci_access *access,
+					   const struct tetris_ccci_tag_data *count_tag,
+					   const struct tetris_ccci_tag_data *layout,
+					   struct tetris_ccci_result *result)
+{
+	u32 count = get_unaligned_le32(count_tag->data);
+	unsigned int i, j;
+
+	if (!count || count > UINT32_MAX / TETRIS_CCCI_SMEM_REGION_SIZE ||
+	    layout->size != count * TETRIS_CCCI_SMEM_REGION_SIZE) {
+		result->failure = TETRIS_CCCI_BAD_SMEM_TABLE;
+		return -EINVAL;
+	}
+
+	for (i = 0; i < count; i++) {
+		const u8 *entry = layout->data +
+			i * TETRIS_CCCI_SMEM_REGION_SIZE;
+		u64 base = get_unaligned_le64(entry);
+		u32 id = get_unaligned_le32(entry + 16);
+		u32 size = get_unaligned_le32(entry + 24);
+		u32 align = get_unaligned_le32(entry + 28);
+
+		if (!base || !size ||
+		    (align && ((align & (align - 1)) || (base & (align - 1)))) ||
+		    !tetris_ccci_payload_range_allowed(fdt, access, base, size)) {
+			result->failure = TETRIS_CCCI_BAD_SMEM_TABLE;
+			return -ERANGE;
+		}
+
+		for (j = 0; j < i; j++) {
+			const u8 *previous = layout->data +
+				j * TETRIS_CCCI_SMEM_REGION_SIZE;
+			u64 previous_base = get_unaligned_le64(previous);
+			u32 previous_id = get_unaligned_le32(previous + 16);
+			u32 previous_size = get_unaligned_le32(previous + 24);
+
+			if (id == previous_id ||
+			    tetris_ccci_ranges_overlap(base, size, previous_base,
+						       previous_size)) {
+				result->failure = TETRIS_CCCI_BAD_SMEM_TABLE;
+				return -EINVAL;
+			}
+		}
+	}
+
+	return 0;
+}
+
+static bool tetris_ccci_smem_tables_overlap(const struct tetris_ccci_tag_data *first,
+					    const struct tetris_ccci_tag_data *second)
+{
+	u32 first_count = first->size / TETRIS_CCCI_SMEM_REGION_SIZE;
+	u32 second_count = second->size / TETRIS_CCCI_SMEM_REGION_SIZE;
+	unsigned int i, j;
+
+	for (i = 0; i < first_count; i++) {
+		const u8 *first_entry = first->data +
+			i * TETRIS_CCCI_SMEM_REGION_SIZE;
+		u64 first_base = get_unaligned_le64(first_entry);
+		u32 first_size = get_unaligned_le32(first_entry + 24);
+
+		for (j = 0; j < second_count; j++) {
+			const u8 *second_entry = second->data +
+				j * TETRIS_CCCI_SMEM_REGION_SIZE;
+			u64 second_base = get_unaligned_le64(second_entry);
+			u32 second_size = get_unaligned_le32(second_entry + 24);
+
+			if (tetris_ccci_ranges_overlap(first_base, first_size,
+						       second_base, second_size))
+				return true;
+		}
+	}
+
+	return false;
+}
+
+static int tetris_ccci_validate_payload(const void *fdt,
+					const struct tetris_ccci_access *access,
+					const struct tetris_ccci_descriptor *desc,
+					const struct tetris_ccci_tag_data tags[],
+					struct tetris_ccci_result *result)
+{
+	const struct tetris_ccci_tag_data *modem =
+		&tags[TETRIS_CCCI_TAG_HDR_TABLE];
+	const struct tetris_ccci_tag_data *nc_count =
+		&tags[TETRIS_CCCI_TAG_NC_LAYOUT_NUM];
+	const struct tetris_ccci_tag_data *c_count =
+		&tags[TETRIS_CCCI_TAG_C_LAYOUT_NUM];
+	const struct tetris_ccci_tag_data *nc_layout =
+		&tags[TETRIS_CCCI_TAG_NC_LAYOUT];
+	const struct tetris_ccci_tag_data *c_layout =
+		&tags[TETRIS_CCCI_TAG_C_LAYOUT];
+	u32 direct_tags = result->known_tags & TETRIS_CCCI_DIRECT_SMEM_TAGS;
+	u64 md_base;
+	u32 md_size, raw_image_size;
+	int ret;
+
+	(void)desc->load_flag;
+	if ((result->known_tags & TETRIS_CCCI_REQUIRED_PAYLOAD) !=
+	    TETRIS_CCCI_REQUIRED_PAYLOAD) {
+		result->failure = TETRIS_CCCI_MISSING_PAYLOAD_TAG;
+		return -ENODATA;
+	}
+	if (get_unaligned_le32(tags[TETRIS_CCCI_TAG_HDR_COUNT].data) != 1) {
+		result->failure = TETRIS_CCCI_BAD_HDR_COUNT;
+		return -EINVAL;
+	}
+	result->payload_valid_mask |= TETRIS_CCCI_CORE_HDR_COUNT;
+
+	md_base = get_unaligned_le64(modem->data);
+	md_size = get_unaligned_le32(modem->data + 8);
+	result->md_id = modem->data[12];
+	result->md_type = modem->data[14];
+	if (!md_base || !md_size || result->md_id || modem->data[13] ||
+	    !result->md_type || result->md_type > TETRIS_CCCI_MD_TYPE_MAX) {
+		result->failure = TETRIS_CCCI_BAD_MODEM_INFO;
+		return -EINVAL;
+	}
+	if (!tetris_ccci_payload_range_allowed(fdt, access, md_base, md_size)) {
+		result->failure = TETRIS_CCCI_BAD_MD_RANGE;
+		return -ERANGE;
+	}
+	result->payload_valid_mask |= TETRIS_CCCI_CORE_HDR_TABLE;
+
+	ret = tetris_ccci_validate_md_layout(&tags[TETRIS_CCCI_TAG_MD_LAYOUT],
+					     md_base, md_size, result);
+	if (ret)
+		return ret;
+	ret = tetris_ccci_validate_check_header(&tags[TETRIS_CCCI_TAG_MD_CHECK],
+						result->md_type, md_size, result);
+	if (ret)
+		return ret;
+
+	raw_image_size = get_unaligned_le32(tags[TETRIS_CCCI_TAG_MD_IMAGE].data);
+	if (!raw_image_size || raw_image_size < result->md_image_size ||
+	    raw_image_size > md_size) {
+		result->failure = TETRIS_CCCI_BAD_IMAGE_SIZE;
+		return -ERANGE;
+	}
+	result->payload_valid_mask |= TETRIS_CCCI_CORE_MD_IMAGE;
+
+	ret = tetris_ccci_validate_smem_layout(fdt, access,
+					       &tags[TETRIS_CCCI_TAG_SMEM_LAYOUT],
+					       md_base, md_size, result);
+	if (ret)
+		return ret;
+
+	if (direct_tags && direct_tags != TETRIS_CCCI_DIRECT_SMEM_TAGS) {
+		result->failure = TETRIS_CCCI_BAD_SMEM_TAG_SET;
+		return -EINVAL;
+	}
+	if (direct_tags) {
+		ret = tetris_ccci_validate_smem_table(fdt, access, nc_count,
+						      nc_layout, result);
+		if (ret)
+			return ret;
+		ret = tetris_ccci_validate_smem_table(fdt, access, c_count,
+						      c_layout, result);
+		if (ret)
+			return ret;
+		if (tetris_ccci_smem_tables_overlap(nc_layout, c_layout)) {
+			result->failure = TETRIS_CCCI_BAD_SMEM_TABLE;
+			return -EINVAL;
+		}
+		result->payload_valid_mask |= TETRIS_CCCI_DIRECT_SMEM_TAGS;
+	}
+
+	result->payload_valid = true;
+	return 0;
+}
+
 static int tetris_ccci_observe(const void *fdt,
 			       const struct tetris_ccci_access *access,
 			       struct tetris_ccci_result *result)
 {
 	struct tetris_ccci_descriptor desc = { 0 };
+	struct tetris_ccci_tag_data tags[TETRIS_CCCI_TAG_COUNT] = { 0 };
 	const void *buffer;
 	int ret;
 
@@ -525,7 +976,12 @@ static int tetris_ccci_observe(const void *fdt,
 		result->failure = TETRIS_CCCI_MAP_FAILED;
 		return -EFAULT;
 	}
-	ret = tetris_ccci_validate_tags(buffer, &desc, result);
+	ret = tetris_ccci_validate_tags(buffer, &desc, result, tags);
+	if (!ret) {
+		result->structure_valid = true;
+		ret = tetris_ccci_validate_payload(fdt, access, &desc, tags,
+						   result);
+	}
 	if (access->unmap)
 		access->unmap(buffer, access->context);
 	if (ret)
@@ -538,7 +994,7 @@ static int tetris_ccci_observe(const void *fdt,
 static int tetris_ccci_publish_status(void *fdt,
 				      const struct tetris_ccci_result *result)
 {
-	const char *failure, *observation;
+	const char *failure, *observation, *payload_status;
 	int chosen, node, ret;
 
 	chosen = fdt_path_offset(fdt, "/chosen");
@@ -558,8 +1014,9 @@ static int tetris_ccci_publish_status(void *fdt,
 
 	failure = result->failure < ARRAY_SIZE(tetris_ccci_failure_names) ?
 		tetris_ccci_failure_names[result->failure] : "unknown";
-	observation = result->failure == TETRIS_CCCI_OK ?
-		"structure-valid" : "invalid";
+	observation = result->structure_valid ? "structure-valid" : "invalid";
+	payload_status = result->payload_valid ? "valid" :
+		result->structure_valid ? "invalid" : "not-checked";
 	ret = fdt_setprop_u32(fdt, node, "version", result->version);
 	if (!ret)
 		ret = fdt_setprop_u32(fdt, node, "size", result->size);
@@ -569,15 +1026,51 @@ static int tetris_ccci_publish_status(void *fdt,
 		ret = fdt_setprop_u32(fdt, node, "known-tag-mask",
 				      result->known_tags);
 	if (!ret)
+		ret = fdt_setprop_u32(fdt, node, "payload-valid-mask",
+				      result->payload_valid_mask);
+	if (!ret)
 		ret = fdt_setprop_u32(fdt, node, "failure-code", result->failure);
 	if (!ret)
 		ret = fdt_setprop_string(fdt, node, "failure", failure);
 	if (!ret)
 		ret = fdt_setprop_string(fdt, node, "observation-status",
 					 observation);
-	if (result->failure == TETRIS_CCCI_OK)
+	if (!ret)
+		ret = fdt_setprop_string(fdt, node, "payload-status",
+					 payload_status);
+	if (result->structure_valid && !result->payload_valid) {
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "payload-failure-code",
+					      result->failure);
+		if (!ret)
+			ret = fdt_setprop_string(fdt, node, "payload-failure",
+						 failure);
+	}
+	if (result->structure_valid)
 		if (!ret)
 			ret = fdt_setprop(fdt, node, "structure-validated", NULL, 0);
+	if (result->payload_valid) {
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "md-id", result->md_id);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "md-type",
+					      result->md_type);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node,
+					      "md-check-header-version",
+					      result->md_check_header_version);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "md-image-size",
+					      result->md_image_size);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "md-memory-size",
+					      result->md_memory_size);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "smem-total-size",
+					      result->smem_total_size);
+		if (!ret)
+			ret = fdt_setprop(fdt, node, "payload-validated", NULL, 0);
+	}
 	if (!ret)
 		return 0;
 
@@ -904,9 +1397,12 @@ static int tetris_observe_ccci_handoff(void *fdt)
 
 	failure = result.failure < ARRAY_SIZE(tetris_ccci_failure_names) ?
 		tetris_ccci_failure_names[result.failure] : "unknown";
-	printf("Tetris: CCCI structure %s: v%u size=%u tags=%u known=%x failure=%s\n",
-	       ret ? "invalid" : "valid", result.version, result.size,
-	       result.count, result.known_tags, failure);
+	printf("Tetris: CCCI structure=%s payload=%s: v%u size=%u tags=%u known=%x failure=%s\n",
+	       result.structure_valid ? "valid" : "invalid",
+	       result.payload_valid ? "valid" :
+	       result.structure_valid ? "invalid" : "not-checked",
+	       result.version, result.size, result.count, result.known_tags,
+	       failure);
 
 	return ret;
 }

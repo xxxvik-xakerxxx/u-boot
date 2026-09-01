@@ -157,10 +157,13 @@ jobs:
               'tetris_ccci_buffer_reserved(fdt, desc.base, desc.size)',
               'tetris_ccci_buffer_in_lk_memory(fdt, desc.base, desc.size)',
               'access->range_allowed(desc.base, desc.size, access->context)',
-              'tetris_ccci_validate_tags(buffer, &desc, result)',
+              'tetris_ccci_validate_tags(buffer, &desc, result, tags)',
+              'tetris_ccci_validate_payload(fdt, access, &desc, tags,',
               '"nothing,ccci-handoff-status"',
               '"observation-status"',
+              '"payload-status"',
               '"structure-validated"',
+              '"payload-validated"',
               'tetris_ccci_in_uboot_dram',
               'tetris_observe_ccci_handoff(fdt)',
           ):
@@ -170,6 +173,10 @@ jobs:
               raise SystemExit("CCCI observation must not invoke the CCCI SMC ABI")
           if '"runtime-ready"' in handler or '"validated"' in handler:
               raise SystemExit("structure observation must not claim modem readiness")
+          ccci_parser = handler[
+              handler.index("static int tetris_ccci_validate_payload"):
+              handler.index("static int tetris_ccci_observe")
+          ]
           ccci_runtime = handler[
               handler.index("static const void *tetris_ccci_map"):
               handler.index("void board_prep_linux")
@@ -185,10 +192,11 @@ jobs:
               "dma_",
               "scp_",
           ):
-              if forbidden in ccci_runtime:
-                  raise SystemExit(
-                      f"CCCI observation gained a hardware side effect: {forbidden}"
-                  )
+              for scope in (ccci_parser, ccci_runtime):
+                  if forbidden in scope:
+                      raise SystemExit(
+                          f"CCCI observation gained a hardware side effect: {forbidden}"
+                      )
           if handler.index("tetris_observe_ccci_handoff(fdt)") > handler.index(
               "tetris_prepare_connsys_emi(fdt)",
               handler.index("void board_prep_linux"),
