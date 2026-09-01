@@ -837,6 +837,33 @@ static void test_tag_failures(void)
 		       "unterminated tag name");
 }
 
+static void test_gnss_emi_handoff(void)
+{
+	fdt32_t zero = 0;
+	struct fixture fixture;
+	const fdt32_t *cells;
+	int gps, len;
+
+	fixture_init(&fixture, true, false);
+	gps = fdt_add_subnode(fixture.fdt, 0, "gps");
+	require(gps >= 0, "add GPS node");
+	require(!fdt_setprop_string(fixture.fdt, gps, "compatible",
+				    "mediatek,mt6878-gps"),
+		"set GPS compatible");
+	require(!fdt_setprop(fixture.fdt, gps, "emi-addr", &zero,
+			     sizeof(zero)),
+		"set vendor one-cell GPS placeholder");
+
+	require(!tetris_publish_gps_emi_addr(fixture.fdt, gps),
+		"publish fixed GPS EMI address");
+	cells = fdt_getprop(fixture.fdt, gps, "emi-addr", &len);
+	require(cells && len == 2 * sizeof(*cells),
+		"GPS EMI address is exactly two FDT cells");
+	require(fdt32_to_cpu(cells[0]) == (TETRIS_GPS_EMI_BASE >> 32) &&
+		fdt32_to_cpu(cells[1]) == (u32)TETRIS_GPS_EMI_BASE,
+		"GPS EMI cells encode the board constant");
+}
+
 int main(void)
 {
 	test_valid(true, false);
@@ -849,6 +876,7 @@ int main(void)
 	test_payload_failures();
 	test_publish_no_space();
 	test_tag_failures();
+	test_gnss_emi_handoff();
 	puts("Tetris CCCI handoff host tests: PASS");
 	return 0;
 }

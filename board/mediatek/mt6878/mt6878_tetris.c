@@ -74,6 +74,7 @@ static u64 tetris_test_get_le64(const void *ptr)
 #define TETRIS_CCCI_MD_CHECK_MAGIC	"CHECK_HEADER"
 #define TETRIS_CCCI_MD_CHECK_MAGIC_SIZE	12U
 #define TETRIS_CCCI_MD_TYPE_MAX		14U
+#define TETRIS_GPS_EMI_BASE		0x86a00000ULL
 #define TETRIS_CCCI_MAX_TAGS \
 	(TETRIS_CCCI_MAX_INFO_SIZE / TETRIS_CCCI_V1_TAG_SIZE)
 
@@ -1078,6 +1079,11 @@ static int tetris_ccci_publish_status(void *fdt,
 	return ret;
 }
 
+static int tetris_publish_gps_emi_addr(void *fdt, int gps)
+{
+	return fdt_setprop_u64(fdt, gps, "emi-addr", TETRIS_GPS_EMI_BASE);
+}
+
 #ifndef TETRIS_CCCI_HANDOFF_HOST_TEST
 
 DECLARE_GLOBAL_DATA_PTR;
@@ -1092,7 +1098,6 @@ DECLARE_GLOBAL_DATA_PTR;
 
 #define TETRIS_CONNSYS_EMI_BASE		0x85e00000ULL
 #define TETRIS_CONNSYS_EMI_SIZE		0x00c00000ULL
-#define TETRIS_GPS_EMI_BASE		0x86a00000ULL
 #define TETRIS_GPS_EMI_SIZE		0x00100000ULL
 #define TETRIS_MD_CACHE_EMI_BASE	0x88000000ULL
 #define TETRIS_MD_CACHE_EMI_SIZE	0x02560000ULL
@@ -1194,7 +1199,7 @@ static int tetris_set_connsys_emi(unsigned long selector, u64 base, u64 size,
 	return 0;
 }
 
-static int tetris_prepare_connsys_emi(const void *fdt)
+static int tetris_prepare_connsys_emi(void *fdt)
 {
 	fdt_size_t md_reserved_size, reserved_size;
 	fdt_addr_t base, md_base;
@@ -1287,8 +1292,17 @@ static int tetris_prepare_connsys_emi(const void *fdt)
 	if (ret)
 		return ret;
 
-	return tetris_set_connsys_emi(MTK_SIP_CONNSYS_EMI_GPS, gps_base,
-				      gps_size, "GPS");
+	ret = tetris_set_connsys_emi(MTK_SIP_CONNSYS_EMI_GPS, gps_base,
+				     gps_size, "GPS");
+	if (ret)
+		return ret;
+
+	ret = tetris_publish_gps_emi_addr(fdt, gps);
+	if (ret)
+		printf("Tetris: GPS EMI handoff publication failed: %s\n",
+		       fdt_strerror(ret));
+
+	return ret;
 }
 
 static int tetris_handoff_devinfo(void *fdt)

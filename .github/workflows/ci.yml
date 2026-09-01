@@ -204,6 +204,26 @@ jobs:
               raise SystemExit("CCCI observation moved after active boot preparation")
 
           for record in (
+              '#define TETRIS_GPS_EMI_BASE\t\t0x86a00000ULL',
+              'fdt_setprop_u64(fdt, gps, "emi-addr", TETRIS_GPS_EMI_BASE)',
+              'tetris_publish_gps_emi_addr(fdt, gps)',
+          ):
+              if record not in handler:
+                  raise SystemExit(f"missing fixed GPS EMI handoff: {record}")
+          prepare = handler[
+              handler.index("static int tetris_prepare_connsys_emi"):
+              handler.index("static int tetris_handoff_devinfo")
+          ]
+          gps_mapping = prepare.index(
+              "tetris_set_connsys_emi(MTK_SIP_CONNSYS_EMI_GPS"
+          )
+          gps_publish = prepare.index("tetris_publish_gps_emi_addr(fdt, gps)")
+          if gps_mapping > gps_publish:
+              raise SystemExit("GPS EMI address is published before its SMC mapping")
+          if "if (ret)\n\t\treturn ret;" not in prepare[gps_mapping:gps_publish]:
+              raise SystemExit("GPS EMI publication is not gated by SMC success")
+
+          for record in (
               "#define TETRIS_WDT_BASE\t\t\t0x1c00a000UL",
               "#define TETRIS_WDT_NONRST_REG2\t\t0x24",
               "#define TETRIS_REBOOT_MODE_MASK\t\t0xf",
