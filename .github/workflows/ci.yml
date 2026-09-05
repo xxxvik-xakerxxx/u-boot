@@ -46,6 +46,19 @@ jobs:
             -r tools/buildman/requirements.txt \
             -r tools/u_boot_pylib/requirements.txt
 
+      - name: Compile initramfs-only previous-bootloader handoff
+        run: |
+          make O=build-initramfs-only mt6878_tetris_defconfig
+          scripts/config --file build-initramfs-only/.config \
+            --disable SAVE_PREV_BL_FDT_ADDR \
+            --enable SAVE_PREV_BL_INITRAMFS_START_ADDR
+          make O=build-initramfs-only olddefconfig
+          make O=build-initramfs-only -j"$(nproc)" \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            arch/arm/lib/save_prev_bl_data.o \
+            common/board_f.o \
+            board/mediatek/mt6878/mt6878_tetris.o
+
       - name: Configure
         run: |
           . .venv/bin/activate
@@ -59,19 +72,6 @@ jobs:
         run: |
           . .venv/bin/activate
           make -j"$(nproc)" CROSS_COMPILE=aarch64-linux-gnu-
-
-      - name: Compile initramfs-only previous-bootloader handoff
-        run: |
-          make O=build-initramfs-only mt6878_tetris_defconfig
-          scripts/config --file build-initramfs-only/.config \
-            --disable SAVE_PREV_BL_FDT_ADDR \
-            --enable SAVE_PREV_BL_INITRAMFS_START_ADDR
-          make O=build-initramfs-only olddefconfig
-          make O=build-initramfs-only -j"$(nproc)" \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            arch/arm/lib/save_prev_bl_data.o \
-            common/board_f.o \
-            board/mediatek/mt6878/mt6878_tetris.o
 
       - name: Validate embedded postmarketOS boot flow
         run: |
