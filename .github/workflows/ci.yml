@@ -60,6 +60,19 @@ jobs:
           . .venv/bin/activate
           make -j"$(nproc)" CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Compile initramfs-only previous-bootloader handoff
+        run: |
+          make O=build-initramfs-only mt6878_tetris_defconfig
+          scripts/config --file build-initramfs-only/.config \
+            --disable SAVE_PREV_BL_FDT_ADDR \
+            --enable SAVE_PREV_BL_INITRAMFS_START_ADDR
+          make O=build-initramfs-only olddefconfig
+          make O=build-initramfs-only -j"$(nproc)" \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            arch/arm/lib/save_prev_bl_data.o \
+            common/board_f.o \
+            board/mediatek/mt6878/mt6878_tetris.o
+
       - name: Validate embedded postmarketOS boot flow
         run: |
           python3 - <<'PY'
@@ -142,7 +155,8 @@ jobs:
                   raise SystemExit(f"missing Tetris button config: {symbol}")
 
           for record in (
-              'env_get_hex("prevbl_fdt_addr", 0)',
+              'get_preserved_prev_bl_fdt(&prev_fdt_addr, &prev_fdt_size)',
+              'map_sysmem(prev_fdt_addr, prev_fdt_size)',
               'fdt_getprop(prev_fdt, prev_chosen, "atag,devinfo", &len)',
               'fdt_setprop(fdt, chosen, "atag,devinfo", tag,',
               'printf("Tetris: LK devinfo handoff unavailable: %d\\n", ret)',
@@ -251,6 +265,21 @@ jobs:
               "reg2 >= SZ_1G",
               'fdt_has_devinfo(reg2)',
               'fdt_getprop(fdt_blob, chosen, "atag,devinfo", &len)',
+              "MT6878_PREV_BL_FDT_MAX_SIZE",
+              "dram_start = gd->ram_base",
+              "dram_end = dram_start + gd->ram_size",
+              "addr < dram_start || end > dram_end",
+              "is_normal_memory_range((phys_addr_t)addr, size)",
+              "PMD_ATTRINDX_MASK",
+              "fdt_check_full(fdt_blob, size)",
+              "copy_addr = ALIGN_DOWN(gd->start_addr_sp - size, 64)",
+              "source = map_sysmem((phys_addr_t)addr, size)",
+              "memmove(copy, source, size)",
+              "fdt_check_full(copy, size)",
+              "gd->start_addr_sp = copy_addr",
+              "preserved_fdt_addr = copy_addr",
+              'env_set("prevbl_fdt_addr", NULL)',
+              'env_set_addr("prevbl_fdt_addr", (void *)addr)',
               "fdt_valid(&fdt_blob)",
           ):
               if record not in prevbl:
@@ -260,6 +289,27 @@ jobs:
               prevbl.index("phys_addr_t get_prev_bl_fdt_addr(void)"),
           ):
               raise SystemExit("MT6878 devinfo FDT is not preferred over generic x0")
+          board_f = Path("common/board_f.c").read_text()
+          preserve = board_f.index("INITCALL(reserve_prev_bl_fdt)")
+          malloc_reserve = board_f.index("INITCALL(reserve_malloc)")
+          board_reserve = board_f.index("INITCALL(reserve_board)")
+          if not malloc_reserve < preserve < board_reserve:
+              raise SystemExit(
+                  "LK FDT must be reserved after malloc and before board data"
+              )
+          reserve_guard = board_f[board_f.rfind("#if", 0, preserve):preserve]
+          for symbol in (
+              "SAVE_PREV_BL_FDT_ADDR",
+              "SAVE_PREV_BL_INITRAMFS_START_ADDR",
+          ):
+              if symbol not in reserve_guard:
+                  raise SystemExit(f"LK FDT reserve guard misses {symbol}")
+          publish = prevbl.index('env_set_addr("prevbl_fdt_addr"')
+          use_copy = prevbl.index("get_preserved_prev_bl_fdt(&preserved_addr")
+          if use_copy > publish:
+              raise SystemExit("original LK FDT address is published")
+          if 'env_get_hex("prevbl_fdt_addr", 0)' in handler:
+              raise SystemExit("Tetris runtime still trusts stale LK FDT environment")
           PY
 
       - name: Download LK template

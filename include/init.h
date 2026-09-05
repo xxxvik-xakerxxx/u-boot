@@ -177,6 +177,22 @@ defined(CONFIG_SAVE_PREV_BL_FDT_ADDR)
 int save_prev_bl_data(void);
 
 /**
+ * reserve_prev_bl_fdt - Preserve previous bootloader FDT before relocation.
+ *
+ * Return: 0; preservation failures remain non-fatal and are reported later
+ */
+int reserve_prev_bl_fdt(void);
+
+/**
+ * get_preserved_prev_bl_fdt - Return the validated preserved FDT range.
+ * @addrp: physical address of the preserved FDT
+ * @sizep: size of the preserved FDT
+ *
+ * Return: 0 if valid, a negative errno otherwise
+ */
+int get_preserved_prev_bl_fdt(phys_addr_t *addrp, size_t *sizep);
+
+/**
  * get_prev_bl_fdt_addr - When u-boot is chainloaded, get the address
  * of the FDT passed by the previous bootloader.
  *

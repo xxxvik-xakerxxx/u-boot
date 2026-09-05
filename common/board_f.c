@@ -983,6 +983,10 @@ static void initcall_run_f(void)
 	INITCALL(reserve_trace);
 	INITCALL(reserve_uboot);
 	INITCALL(reserve_malloc);
+#if CONFIG_IS_ENABLED(SAVE_PREV_BL_FDT_ADDR) || \
+	CONFIG_IS_ENABLED(SAVE_PREV_BL_INITRAMFS_START_ADDR)
+	INITCALL(reserve_prev_bl_fdt);
+#endif
 	INITCALL(reserve_board);
 	INITCALL(reserve_global_data);
 	INITCALL(reserve_fdt);

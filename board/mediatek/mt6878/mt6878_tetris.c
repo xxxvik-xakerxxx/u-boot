@@ -1309,45 +1309,55 @@ static int tetris_handoff_devinfo(void *fdt)
 {
 	const struct tetris_devinfo_tag *tag;
 	const void *prev_fdt;
+	phys_addr_t prev_fdt_addr;
+	size_t prev_fdt_size;
 	int chosen, len, prev_chosen, ret;
-	ulong prev_fdt_addr;
 	u32 words;
 
-	prev_fdt_addr = env_get_hex("prevbl_fdt_addr", 0);
-	if (!prev_fdt_addr)
-		return -ENODATA;
-
-	prev_fdt = (const void *)prev_fdt_addr;
-	if (fdt_check_header(prev_fdt))
-		return -ENODATA;
+	ret = get_preserved_prev_bl_fdt(&prev_fdt_addr, &prev_fdt_size);
+	if (ret)
+		return ret;
+	prev_fdt = map_sysmem(prev_fdt_addr, prev_fdt_size);
+	if (!prev_fdt)
+		return -ENOMEM;
 
 	prev_chosen = fdt_path_offset(prev_fdt, "/chosen");
 	if (prev_chosen < 0)
 		prev_chosen = fdt_path_offset(prev_fdt, "/chosen@0");
-	if (prev_chosen < 0)
-		return prev_chosen;
+	if (prev_chosen < 0) {
+		ret = prev_chosen;
+		goto out;
+	}
 
 	tag = fdt_getprop(prev_fdt, prev_chosen, "atag,devinfo", &len);
-	if (!tag || len < sizeof(*tag))
-		return -ENODATA;
+	if (!tag || len < sizeof(*tag)) {
+		ret = -ENODATA;
+		goto out;
+	}
 
 	memcpy(&words, &tag->data_size, sizeof(words));
 	if (!words || words > TETRIS_DEVINFO_MAX_WORDS ||
-	    len < sizeof(*tag) + words * sizeof(u32))
-		return -EINVAL;
+	    len < sizeof(*tag) + words * sizeof(u32)) {
+		ret = -EINVAL;
+		goto out;
+	}
 
 	chosen = fdt_path_offset(fdt, "/chosen");
-	if (chosen < 0)
-		return chosen;
+	if (chosen < 0) {
+		ret = chosen;
+		goto out;
+	}
 
 	ret = fdt_setprop(fdt, chosen, "atag,devinfo", tag,
 			  sizeof(*tag) + words * sizeof(u32));
 	if (ret)
-		return ret;
+		goto out;
 
 	printf("Tetris: handed off %u devinfo words from LK\n", words);
 
-	return 0;
+out:
+	unmap_sysmem(prev_fdt);
+	return ret;
 }
 
 static bool tetris_ccci_in_uboot_dram(u64 base, u32 size, void *context)
@@ -1393,16 +1403,19 @@ static int tetris_observe_ccci_handoff(void *fdt)
 	};
 	const void *prev_fdt = NULL;
 	const char *failure;
-	ulong prev_fdt_addr;
+	phys_addr_t prev_fdt_addr;
+	size_t prev_fdt_size;
 	int publish_ret, ret;
 
-	prev_fdt_addr = env_get_hex("prevbl_fdt_addr", 0);
-	if (prev_fdt_addr)
-		prev_fdt = (const void *)prev_fdt_addr;
-	if (!prev_fdt || fdt_check_header(prev_fdt))
-		ret = -ENODATA;
-	else
+	ret = get_preserved_prev_bl_fdt(&prev_fdt_addr, &prev_fdt_size);
+	if (!ret)
+		prev_fdt = map_sysmem(prev_fdt_addr, prev_fdt_size);
+	if (!ret && !prev_fdt)
+		ret = -ENOMEM;
+	if (!ret)
 		ret = tetris_ccci_observe(prev_fdt, &access, &result);
+	if (prev_fdt)
+		unmap_sysmem(prev_fdt);
 
 	publish_ret = tetris_ccci_publish_status(fdt, &result);
 	if (publish_ret)
