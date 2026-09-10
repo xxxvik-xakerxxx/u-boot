@@ -1,0 +1,279 @@
+// SPDX-License-Identifier: GPL-2.0+
+
+#ifdef TETRIS_SCP_HANDOFF_HOST_TEST
+#include <errno.h>
+#include <limits.h>
+#include <string.h>
+#include <libfdt.h>
+#else
+#include <linux/errno.h>
+#include <linux/libfdt.h>
+#include <linux/string.h>
+#endif
+
+#include "tetris_scp_handoff.h"
+
+#define TETRIS_SCP_SHARE_COMPAT	"mediatek,reserve-memory-scp_share"
+#define TETRIS_SCP_FW_COMPAT	"mediatek,SCP-reserved"
+#define TETRIS_SCP_SHARE_MIN	0x11a9b00ULL
+#define TETRIS_SCP_SHARE_LIMIT	0x90000000ULL
+
+static const char *const tetris_scp_failure_names[] = {
+	[TETRIS_SCP_OK] = "ok",
+	[TETRIS_SCP_BAD_ARGUMENT] = "bad-argument",
+	[TETRIS_SCP_BAD_FDT] = "bad-fdt",
+	[TETRIS_SCP_NO_RESERVED_MEMORY] = "no-reserved-memory",
+	[TETRIS_SCP_BAD_CELLS] = "bad-cells",
+	[TETRIS_SCP_MISSING_SHARE] = "missing-share",
+	[TETRIS_SCP_DUPLICATE_SHARE] = "duplicate-share",
+	[TETRIS_SCP_MISSING_FIRMWARE] = "missing-firmware",
+	[TETRIS_SCP_DUPLICATE_FIRMWARE] = "duplicate-firmware",
+	[TETRIS_SCP_BAD_CARVEOUT_PARENT] = "bad-carveout-parent",
+	[TETRIS_SCP_BAD_SHARE_REG] = "bad-share-reg",
+	[TETRIS_SCP_BAD_FIRMWARE_REG] = "bad-firmware-reg",
+	[TETRIS_SCP_RANGE_OVERFLOW] = "range-overflow",
+	[TETRIS_SCP_SHARE_TOO_SMALL] = "share-too-small",
+	[TETRIS_SCP_SHARE_OUT_OF_WINDOW] = "share-out-of-window",
+	[TETRIS_SCP_NOT_IN_DRAM] = "not-in-dram",
+	[TETRIS_SCP_CARVEOUT_OVERLAP] = "carveout-overlap",
+	[TETRIS_SCP_SLOT_UNVERIFIED] = "slot-unverified",
+	[TETRIS_SCP_BAD_SLOT] = "bad-slot",
+	[TETRIS_SCP_PARTITION_MISMATCH] = "partition-mismatch",
+	[TETRIS_SCP_BAD_PARTITION_SIZE] = "bad-partition-size",
+	[TETRIS_SCP_BAD_IMAGE_SIZE] = "bad-image-size",
+	[TETRIS_SCP_IDENTITY_UNVERIFIED] = "identity-unverified",
+	[TETRIS_SCP_BAD_IDENTITY] = "bad-identity",
+	[TETRIS_SCP_REGION_INFO_UNVERIFIED] = "region-info-unverified",
+	[TETRIS_SCP_BAD_REGION_INFO] = "bad-region-info",
+	[TETRIS_SCP_REGION_INFO_MISMATCH] = "region-info-mismatch",
+};
+
+const char *tetris_scp_failure_name(enum tetris_scp_failure failure)
+{
+	if (failure < 0 || failure >= (int)(sizeof(tetris_scp_failure_names) /
+					      sizeof(tetris_scp_failure_names[0])) ||
+	    !tetris_scp_failure_names[failure])
+		return "unknown";
+
+	return tetris_scp_failure_names[failure];
+}
+
+static bool tetris_scp_range_end(const struct tetris_scp_range *range,
+				 u64 *end)
+{
+	if (!range->size || range->base > ~(u64)0 - range->size)
+		return false;
+
+	*end = range->base + range->size;
+	return true;
+}
+
+static bool tetris_scp_range_equal(const struct tetris_scp_range *left,
+				   const struct tetris_scp_range *right)
+{
+	return left->base == right->base && left->size == right->size;
+}
+
+static bool tetris_scp_range_contains(const struct tetris_scp_range *outer,
+				      const struct tetris_scp_range *inner)
+{
+	u64 inner_end, outer_end;
+
+	if (!tetris_scp_range_end(outer, &outer_end) ||
+	    !tetris_scp_range_end(inner, &inner_end))
+		return false;
+
+	return inner->base >= outer->base && inner_end <= outer_end;
+}
+
+static bool tetris_scp_in_dram(const struct tetris_scp_range *range,
+			       const struct tetris_scp_range *dram,
+			       size_t dram_count)
+{
+	size_t i;
+
+	for (i = 0; i < dram_count; i++)
+		if (tetris_scp_range_contains(&dram[i], range))
+			return true;
+
+	return false;
+}
+
+static int tetris_scp_unique_node(const void *fdt, const char *compatible,
+				  enum tetris_scp_failure missing,
+				  enum tetris_scp_failure duplicate,
+				  enum tetris_scp_failure *failure)
+{
+	int first, second;
+
+	first = fdt_node_offset_by_compatible(fdt, -1, compatible);
+	if (first < 0) {
+		*failure = missing;
+		return first;
+	}
+
+	second = fdt_node_offset_by_compatible(fdt, first, compatible);
+	if (second >= 0) {
+		*failure = duplicate;
+		return -FDT_ERR_EXISTS;
+	}
+
+	return first;
+}
+
+static int tetris_scp_read_range(const void *fdt, int node,
+				 struct tetris_scp_range *range)
+{
+	const fdt32_t *reg;
+	int len;
+
+	reg = fdt_getprop(fdt, node, "reg", &len);
+	if (!reg || len != 4 * sizeof(*reg))
+		return -FDT_ERR_BADVALUE;
+
+	range->base = (u64)fdt32_to_cpu(reg[0]) << 32 |
+		      fdt32_to_cpu(reg[1]);
+	range->size = (u64)fdt32_to_cpu(reg[2]) << 32 |
+		      fdt32_to_cpu(reg[3]);
+	return 0;
+}
+
+static bool tetris_scp_identity_present(const u8 *identity)
+{
+	size_t i;
+
+	for (i = 0; i < TETRIS_SCP_IDENTITY_SIZE; i++)
+		if (identity[i])
+			return true;
+
+	return false;
+}
+
+static int tetris_scp_fail(struct tetris_scp_inventory *inventory,
+			   enum tetris_scp_failure failure)
+{
+	inventory->failure = failure;
+	return -EINVAL;
+}
+
+int tetris_scp_validate_inventory(const void *fdt,
+				  const struct tetris_scp_range *dram,
+	size_t dram_count,
+	const struct tetris_scp_partition_observation *partition,
+	const struct tetris_scp_region_info_observation *region_info,
+	struct tetris_scp_inventory *inventory)
+{
+	const char *expected_partition;
+	u64 firmware_end, share_end;
+	int firmware, reserved, share;
+
+	if (!inventory)
+		return -EINVAL;
+
+	memset(inventory, 0, sizeof(*inventory));
+	inventory->failure = TETRIS_SCP_BAD_ARGUMENT;
+	if (!fdt || !dram || !dram_count || !partition || !region_info)
+		return -EINVAL;
+	if (fdt_check_header(fdt))
+		return tetris_scp_fail(inventory, TETRIS_SCP_BAD_FDT);
+
+	reserved = fdt_path_offset(fdt, "/reserved-memory");
+	if (reserved < 0)
+		return tetris_scp_fail(inventory,
+					TETRIS_SCP_NO_RESERVED_MEMORY);
+	if (fdt_address_cells(fdt, reserved) != 2 ||
+	    fdt_size_cells(fdt, reserved) != 2)
+		return tetris_scp_fail(inventory, TETRIS_SCP_BAD_CELLS);
+
+	share = tetris_scp_unique_node(fdt, TETRIS_SCP_SHARE_COMPAT,
+				       TETRIS_SCP_MISSING_SHARE,
+				       TETRIS_SCP_DUPLICATE_SHARE,
+				       &inventory->failure);
+	if (share < 0)
+		return -EINVAL;
+	firmware = tetris_scp_unique_node(fdt, TETRIS_SCP_FW_COMPAT,
+					  TETRIS_SCP_MISSING_FIRMWARE,
+					  TETRIS_SCP_DUPLICATE_FIRMWARE,
+					  &inventory->failure);
+	if (firmware < 0)
+		return -EINVAL;
+	if (fdt_parent_offset(fdt, share) != reserved ||
+	    fdt_parent_offset(fdt, firmware) != reserved)
+		return tetris_scp_fail(inventory,
+					TETRIS_SCP_BAD_CARVEOUT_PARENT);
+
+	if (tetris_scp_read_range(fdt, share, &inventory->share))
+		return tetris_scp_fail(inventory, TETRIS_SCP_BAD_SHARE_REG);
+	if (tetris_scp_read_range(fdt, firmware, &inventory->firmware))
+		return tetris_scp_fail(inventory,
+					TETRIS_SCP_BAD_FIRMWARE_REG);
+	if (!tetris_scp_range_end(&inventory->share, &share_end) ||
+	    !tetris_scp_range_end(&inventory->firmware, &firmware_end))
+		return tetris_scp_fail(inventory, TETRIS_SCP_RANGE_OVERFLOW);
+	if (inventory->share.size < TETRIS_SCP_SHARE_MIN)
+		return tetris_scp_fail(inventory, TETRIS_SCP_SHARE_TOO_SMALL);
+	if (inventory->share.base >= TETRIS_SCP_SHARE_LIMIT ||
+	    share_end > TETRIS_SCP_SHARE_LIMIT)
+		return tetris_scp_fail(inventory,
+					TETRIS_SCP_SHARE_OUT_OF_WINDOW);
+	if (!tetris_scp_in_dram(&inventory->share, dram, dram_count) ||
+	    !tetris_scp_in_dram(&inventory->firmware, dram, dram_count))
+		return tetris_scp_fail(inventory, TETRIS_SCP_NOT_IN_DRAM);
+	if (inventory->share.base < firmware_end &&
+	    inventory->firmware.base < share_end)
+		return tetris_scp_fail(inventory,
+					TETRIS_SCP_CARVEOUT_OVERLAP);
+
+	if (!partition->slot_verified ||
+	    partition->slot_source != TETRIS_SCP_SLOT_SOURCE_BOOT_CONTROL)
+		return tetris_scp_fail(inventory, TETRIS_SCP_SLOT_UNVERIFIED);
+	if (partition->active_slot == TETRIS_SCP_SLOT_A)
+		expected_partition = "scp_a";
+	else if (partition->active_slot == TETRIS_SCP_SLOT_B)
+		expected_partition = "scp_b";
+	else
+		return tetris_scp_fail(inventory, TETRIS_SCP_BAD_SLOT);
+	if (!partition->partition_name ||
+	    strcmp(partition->partition_name, expected_partition))
+		return tetris_scp_fail(inventory,
+					TETRIS_SCP_PARTITION_MISMATCH);
+	if (!partition->partition_size)
+		return tetris_scp_fail(inventory,
+					TETRIS_SCP_BAD_PARTITION_SIZE);
+	if (!partition->image_size ||
+	    partition->image_size > partition->partition_size)
+		return tetris_scp_fail(inventory, TETRIS_SCP_BAD_IMAGE_SIZE);
+	if (!partition->identity_verified)
+		return tetris_scp_fail(inventory,
+					TETRIS_SCP_IDENTITY_UNVERIFIED);
+	if (!tetris_scp_identity_present(partition->image_identity))
+		return tetris_scp_fail(inventory, TETRIS_SCP_BAD_IDENTITY);
+
+	if (!region_info->abi_verified)
+		return tetris_scp_fail(inventory,
+					TETRIS_SCP_REGION_INFO_UNVERIFIED);
+	if (!region_info->abi_version || !region_info->structure_size)
+		return tetris_scp_fail(inventory, TETRIS_SCP_BAD_REGION_INFO);
+	if (!tetris_scp_range_equal(&region_info->share, &inventory->share) ||
+	    !tetris_scp_range_equal(&region_info->firmware,
+				    &inventory->firmware))
+		return tetris_scp_fail(inventory,
+					TETRIS_SCP_REGION_INFO_MISMATCH);
+
+	inventory->active_slot = partition->active_slot;
+	inventory->slot_source = partition->slot_source;
+	inventory->partition_size = partition->partition_size;
+	inventory->image_size = partition->image_size;
+	memcpy(inventory->image_identity, partition->image_identity,
+	       sizeof(inventory->image_identity));
+	inventory->region_info_version = region_info->abi_version;
+	inventory->region_info_size = region_info->structure_size;
+	inventory->failure = TETRIS_SCP_OK;
+	inventory->valid = true;
+	return 0;
+}
+
+int tetris_scp_handoff_inventory_disabled(void)
+{
+	return -EOPNOTSUPP;
+}

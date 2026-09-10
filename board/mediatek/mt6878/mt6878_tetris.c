@@ -51,6 +51,8 @@ static u64 tetris_test_get_le64(const void *ptr)
 #include <linux/arm-smccc.h>
 #include <linux/libfdt.h>
 #include <string.h>
+
+#include "tetris_scp_handoff.h"
 #endif
 
 #define TETRIS_CCCI_MAX_INFO_SIZE	0x10000U
@@ -1438,6 +1440,16 @@ void board_prep_linux(struct bootm_headers *images)
 {
 	int ret;
 	void *fdt = (void *)images->ft_addr;
+
+	if (IS_ENABLED(CONFIG_TETRIS_SCP_HANDOFF_INVENTORY)) {
+		/*
+		 * Deliberately fail closed: no authoritative adapter exists yet for
+		 * active-slot/GPT identity or the LK scp_region_info ABI. This does
+		 * not access SCP, reset it, or publish into the Linux FDT.
+		 */
+		ret = tetris_scp_handoff_inventory_disabled();
+		printf("Tetris: SCP handoff inventory disabled: %d\n", ret);
+	}
 
 	ret = tetris_handoff_devinfo(fdt);
 	if (ret)

@@ -51,12 +51,14 @@ jobs:
           make O=build-initramfs-only mt6878_tetris_defconfig
           scripts/config --file build-initramfs-only/.config \
             --disable SAVE_PREV_BL_FDT_ADDR \
-            --enable SAVE_PREV_BL_INITRAMFS_START_ADDR
+            --enable SAVE_PREV_BL_INITRAMFS_START_ADDR \
+            --enable TETRIS_SCP_HANDOFF_INVENTORY
           make O=build-initramfs-only olddefconfig
           make O=build-initramfs-only -j"$(nproc)" \
             CROSS_COMPILE=aarch64-linux-gnu- \
             arch/arm/lib/save_prev_bl_data.o \
             common/board_f.o \
+            board/mediatek/mt6878/tetris_scp_handoff.o \
             board/mediatek/mt6878/mt6878_tetris.o
 
       - name: Configure
@@ -67,6 +69,10 @@ jobs:
       - name: Test bounded LK CCCI handoff observation
         run: |
           .github/tests/run_tetris_ccci_handoff.sh
+
+      - name: Test fail-closed SCP handoff inventory
+        run: |
+          .github/tests/run_tetris_scp_handoff.sh
 
       - name: Build
         run: |
