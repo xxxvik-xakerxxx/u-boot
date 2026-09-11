@@ -837,6 +837,62 @@ static void test_tag_failures(void)
 		       "unterminated tag name");
 }
 
+static void test_source_diagnostics(void)
+{
+	const int errors[][4] = {
+		{ -ENODATA, -ENODATA, -ENODATA, -ENODATA },
+		{ -ENODATA, -EFAULT, -EFAULT, -EBADMSG },
+		{ -EBADMSG, 0, 0, 0 },
+		{ -ENOMEM, 0, 0, -ENODATA },
+		{ 0, 0, -EBADMSG, 0 },
+	};
+	static const char * const names[] = {
+		"source-error", "preservation-error",
+		"x0-validation-error", "x2-validation-error",
+	};
+	struct tetris_ccci_result result = {
+		.failure = TETRIS_CCCI_NO_FDT,
+		.source_checked = true,
+	};
+	struct fixture fixture;
+	const fdt32_t *value;
+	const char *text;
+	unsigned int i, j;
+	int node, len;
+
+	fixture_init(&fixture, true, false);
+	for (i = 0; i < ARRAY_SIZE(errors); i++) {
+		result.source_error = errors[i][0];
+		result.preservation_error = errors[i][1];
+		result.x0_error = errors[i][2];
+		result.x2_error = errors[i][3];
+		require(!tetris_ccci_publish_status(fixture.fdt, &result),
+			"publish source diagnostics");
+		node = fdt_path_offset(fixture.fdt,
+				       "/chosen/nothing,ccci-handoff-status");
+		for (j = 0; j < ARRAY_SIZE(names); j++) {
+			value = fdt_getprop(fixture.fdt, node, names[j], &len);
+			require(value && len == sizeof(*value) &&
+				fdt32_to_cpu(*value) == (u32)errors[i][j],
+				"errno preserves signed 32-bit representation");
+		}
+		text = fdt_getprop(fixture.fdt, node, "payload-status", &len);
+		require(text && !strcmp(text, "not-checked"),
+			"source diagnostics do not promote payload validation");
+		require(!fdt_getprop(fixture.fdt, node, "base", &len) &&
+			!fdt_getprop(fixture.fdt, node, "runtime-ready", &len),
+			"source errors expose neither address nor runtime readiness");
+	}
+	result.source_checked = false;
+	require(!tetris_ccci_publish_status(fixture.fdt, &result),
+		"republish without source observation");
+	node = fdt_path_offset(fixture.fdt,
+			       "/chosen/nothing,ccci-handoff-status");
+	for (j = 0; j < ARRAY_SIZE(names); j++)
+		require(!fdt_getprop(fixture.fdt, node, names[j], &len),
+			"unobserved source errors are omitted, not reported as success");
+}
+
 static void test_gnss_emi_handoff(void)
 {
 	fdt32_t zero = 0;
@@ -876,6 +932,7 @@ int main(void)
 	test_payload_failures();
 	test_publish_no_space();
 	test_tag_failures();
+	test_source_diagnostics();
 	test_gnss_emi_handoff();
 	puts("Tetris CCCI handoff host tests: PASS");
 	return 0;

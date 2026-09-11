@@ -193,6 +193,15 @@ int reserve_prev_bl_fdt(void);
 int get_preserved_prev_bl_fdt(phys_addr_t *addrp, size_t *sizep);
 
 /**
+ * get_prev_bl_fdt_diagnostics - Read early FDT validation errors, not addresses.
+ * @x0_error: result of bounded validation of the early x0 input
+ * @x2_error: result of bounded validation of the early x2 input
+ *
+ * Return: early preservation result, or -EINVAL for null output pointers
+ */
+int get_prev_bl_fdt_diagnostics(int *x0_error, int *x2_error);
+
+/**
  * get_prev_bl_fdt_addr - When u-boot is chainloaded, get the address
  * of the FDT passed by the previous bootloader.
  *

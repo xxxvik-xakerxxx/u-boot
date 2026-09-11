@@ -160,6 +160,11 @@ struct tetris_ccci_result {
 	u32 smem_total_size;
 	bool structure_valid;
 	bool payload_valid;
+	bool source_checked;
+	int source_error;
+	int preservation_error;
+	int x0_error;
+	int x2_error;
 	enum tetris_ccci_failure failure;
 };
 
@@ -1031,6 +1036,20 @@ static int tetris_ccci_publish_status(void *fdt,
 				      result->payload_valid_mask);
 	if (!ret)
 		ret = fdt_setprop_u32(fdt, node, "failure-code", result->failure);
+	if (result->source_checked) {
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "source-error",
+					      (u32)result->source_error);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "preservation-error",
+					      (u32)result->preservation_error);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "x0-validation-error",
+					      (u32)result->x0_error);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "x2-validation-error",
+					      (u32)result->x2_error);
+	}
 	if (!ret)
 		ret = fdt_setprop_string(fdt, node, "failure", failure);
 	if (!ret)
@@ -1405,18 +1424,24 @@ static int tetris_observe_ccci_handoff(void *fdt)
 	const char *failure;
 	phys_addr_t prev_fdt_addr;
 	size_t prev_fdt_size;
-	int publish_ret, ret;
+	int publish_ret, source_ret, ret;
 
 	ret = get_preserved_prev_bl_fdt(&prev_fdt_addr, &prev_fdt_size);
 	if (!ret)
 		prev_fdt = map_sysmem(prev_fdt_addr, prev_fdt_size);
 	if (!ret && !prev_fdt)
 		ret = -ENOMEM;
+	source_ret = ret;
 	if (!ret)
 		ret = tetris_ccci_observe(prev_fdt, &access, &result);
 	if (prev_fdt)
 		unmap_sysmem(prev_fdt);
 
+	/* The validator clears result, so attach source diagnostics afterwards. */
+	result.source_checked = true;
+	result.source_error = source_ret;
+	result.preservation_error =
+		get_prev_bl_fdt_diagnostics(&result.x0_error, &result.x2_error);
 	publish_ret = tetris_ccci_publish_status(fdt, &result);
 	if (publish_ret)
 		printf("Tetris: CCCI status publication failed: %d\n",

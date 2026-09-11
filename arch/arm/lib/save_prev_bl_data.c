@@ -23,6 +23,8 @@ static ulong reg2 __section(".data");
 static ulong preserved_fdt_addr __section(".data");
 static size_t preserved_fdt_size __section(".data");
 static int preserved_fdt_error __section(".data") = -ENODATA;
+static int prev_fdt_x0_error __section(".data") = -ENODATA;
+static int prev_fdt_x2_error __section(".data") = -ENODATA;
 
 #define MT6878_PREV_BL_FDT_MAX_SIZE	SZ_2M
 
@@ -144,6 +146,15 @@ int get_preserved_prev_bl_fdt(phys_addr_t *addrp, size_t *sizep)
 	return 0;
 }
 
+int get_prev_bl_fdt_diagnostics(int *x0_error, int *x2_error)
+{
+	if (!x0_error || !x2_error)
+		return -EINVAL;
+	*x0_error = prev_fdt_x0_error;
+	*x2_error = prev_fdt_x2_error;
+	return preserved_fdt_error;
+}
+
 int reserve_prev_bl_fdt(void)
 {
 	const void *source = NULL;
@@ -159,6 +170,11 @@ int reserve_prev_bl_fdt(void)
 	preserved_fdt_addr = 0;
 	preserved_fdt_size = 0;
 	preserved_fdt_error = -ENODATA;
+	/* Record bounded validation results without publishing input addresses. */
+	prev_fdt_x0_error = reg0 ?
+		validate_mt6878_prev_bl_fdt(reg0, &size) : -ENODATA;
+	prev_fdt_x2_error = reg2 ?
+		validate_mt6878_prev_bl_fdt(reg2, &size) : -ENODATA;
 	addr = get_prev_bl_fdt_addr();
 	if (!addr)
 		return 0;
