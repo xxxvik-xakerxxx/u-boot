@@ -202,6 +202,14 @@ int get_preserved_prev_bl_fdt(phys_addr_t *addrp, size_t *sizep);
 int get_prev_bl_fdt_diagnostics(int *x0_error, int *x2_error);
 
 /**
+ * get_prev_bl_tag_header_error - Read bounded MediaTek input classification.
+ *
+ * Return: first tag header observation error, or zero for a plausible header.
+ * Zero does not validate the remaining tag list or any modem handoff.
+ */
+int get_prev_bl_tag_header_error(void);
+
+/**
  * get_prev_bl_fdt_addr - When u-boot is chainloaded, get the address
  * of the FDT passed by the previous bootloader.
  *

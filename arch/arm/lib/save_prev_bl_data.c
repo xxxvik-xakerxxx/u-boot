@@ -20,21 +20,27 @@ DECLARE_GLOBAL_DATA_PTR;
 
 static ulong reg0 __section(".data");
 static ulong reg2 __section(".data");
+static ulong reg4 __section(".data");
+static ulong reg5 __section(".data");
 static ulong preserved_fdt_addr __section(".data");
 static size_t preserved_fdt_size __section(".data");
 static int preserved_fdt_error __section(".data") = -ENODATA;
 static int prev_fdt_x0_error __section(".data") = -ENODATA;
 static int prev_fdt_x2_error __section(".data") = -ENODATA;
+static int prev_tag_header_error __section(".data") = -ENODATA;
 
 #define MT6878_PREV_BL_FDT_MAX_SIZE	SZ_2M
 
 /**
  * Save boot registers used by the arm64 and legacy ARM boot protocols.
  */
-void save_boot_params(ulong r0, ulong r1, ulong r2_arg, ulong r3)
+void save_boot_params(ulong r0, ulong r1, ulong r2_arg, ulong r3,
+		      ulong r4, ulong r5)
 {
 	reg0 = r0;
 	reg2 = r2_arg;
+	reg4 = r4;
+	reg5 = r5;
 	save_boot_params_ret();
 }
 
@@ -126,6 +132,41 @@ static int validate_mt6878_prev_bl_fdt(ulong addr, size_t *sizep)
 	return 0;
 }
 
+static int observe_mt6878_tag_header(void)
+{
+	const void *source;
+	u32 header[2];
+	u32 size, tag;
+
+	if (!reg0 || !reg4 || !reg5)
+		return -ENODATA;
+	if (reg0 != reg4 || reg5 < sizeof(header))
+		return -EINVAL;
+	if (reg5 > SZ_2M)
+		return -E2BIG;
+	if (!is_normal_memory_range((phys_addr_t)reg0, reg5))
+		return -EFAULT;
+
+	/* Classify only the first header, never copy or publish tag payloads. */
+	source = map_sysmem((phys_addr_t)reg0, sizeof(header));
+	if (!source)
+		return -ENOMEM;
+	memcpy(header, source, sizeof(header));
+	unmap_sysmem(source);
+	size = le32_to_cpu(header[0]);
+	tag = le32_to_cpu(header[1]);
+	if (size < sizeof(header) || size > reg5)
+		return -EBADMSG;
+	if ((tag >> 16) != 0x8861)
+		return -EOPNOTSUPP;
+	return 0;
+}
+
+int get_prev_bl_tag_header_error(void)
+{
+	return prev_tag_header_error;
+}
+
 int get_preserved_prev_bl_fdt(phys_addr_t *addrp, size_t *sizep)
 {
 	size_t size;
@@ -170,6 +211,7 @@ int reserve_prev_bl_fdt(void)
 	preserved_fdt_addr = 0;
 	preserved_fdt_size = 0;
 	preserved_fdt_error = -ENODATA;
+	prev_tag_header_error = observe_mt6878_tag_header();
 	/* Record bounded validation results without publishing input addresses. */
 	prev_fdt_x0_error = reg0 ?
 		validate_mt6878_prev_bl_fdt(reg0, &size) : -ENODATA;

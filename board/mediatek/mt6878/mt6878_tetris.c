@@ -165,6 +165,7 @@ struct tetris_ccci_result {
 	int preservation_error;
 	int x0_error;
 	int x2_error;
+	int tag_header_error;
 	enum tetris_ccci_failure failure;
 };
 
@@ -1049,6 +1050,9 @@ static int tetris_ccci_publish_status(void *fdt,
 		if (!ret)
 			ret = fdt_setprop_u32(fdt, node, "x2-validation-error",
 					      (u32)result->x2_error);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "tag-header-error",
+					      (u32)result->tag_header_error);
 	}
 	if (!ret)
 		ret = fdt_setprop_string(fdt, node, "failure", failure);
@@ -1439,6 +1443,7 @@ static int tetris_observe_ccci_handoff(void *fdt)
 
 	/* The validator clears result, so attach source diagnostics afterwards. */
 	result.source_checked = true;
+	result.tag_header_error = get_prev_bl_tag_header_error();
 	result.source_error = source_ret;
 	result.preservation_error =
 		get_prev_bl_fdt_diagnostics(&result.x0_error, &result.x2_error);

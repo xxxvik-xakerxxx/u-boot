@@ -22,3 +22,4 @@ cd "$root"
 	scripts/dtc/libfdt/fdt_wip.c \
 	-o "$binary"
 "$binary"
+python3 .github/tests/test_tag_header.py

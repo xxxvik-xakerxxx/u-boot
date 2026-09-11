@@ -839,16 +839,20 @@ static void test_tag_failures(void)
 
 static void test_source_diagnostics(void)
 {
-	const int errors[][4] = {
-		{ -ENODATA, -ENODATA, -ENODATA, -ENODATA },
-		{ -ENODATA, -EFAULT, -EFAULT, -EBADMSG },
-		{ -EBADMSG, 0, 0, 0 },
-		{ -ENOMEM, 0, 0, -ENODATA },
-		{ 0, 0, -EBADMSG, 0 },
+	const int errors[][5] = {
+		{ -ENODATA, -ENODATA, -ENODATA, -ENODATA, -ENODATA },
+		{ -ENODATA, -EFAULT, -EFAULT, -EBADMSG, -EFAULT },
+		{ -EBADMSG, 0, 0, 0, -EBADMSG },
+		{ -ENOMEM, 0, 0, -ENODATA, -ENOMEM },
+		{ 0, 0, -EBADMSG, 0, 0 },
+		{ -ENODATA, -ENODATA, -EBADMSG, -ENODATA, -EINVAL },
+		{ -ENODATA, -ENODATA, -EBADMSG, -ENODATA, -E2BIG },
+		{ -ENODATA, -ENODATA, -EBADMSG, -ENODATA, -EOPNOTSUPP },
 	};
 	static const char * const names[] = {
 		"source-error", "preservation-error",
 		"x0-validation-error", "x2-validation-error",
+		"tag-header-error",
 	};
 	struct tetris_ccci_result result = {
 		.failure = TETRIS_CCCI_NO_FDT,
@@ -866,6 +870,7 @@ static void test_source_diagnostics(void)
 		result.preservation_error = errors[i][1];
 		result.x0_error = errors[i][2];
 		result.x2_error = errors[i][3];
+		result.tag_header_error = errors[i][4];
 		require(!tetris_ccci_publish_status(fixture.fdt, &result),
 			"publish source diagnostics");
 		node = fdt_path_offset(fixture.fdt,
