@@ -210,6 +210,17 @@ int get_prev_bl_fdt_diagnostics(int *x0_error, int *x2_error);
 int get_prev_bl_tag_header_error(void);
 
 /**
+ * get_prev_bl_tag_list_diagnostics - Read bounded early header-list results.
+ * @countp: number of headers, excluding the zero-size terminator
+ * @lowp: bitmap of observed 0x88610000..0x8861001f header IDs
+ * @highp: bitmap of observed 0x88610020..0x8861003f header IDs
+ *
+ * Return: header-list observation error; zero does not validate payloads.
+ * All outputs are zero on observation failure. No source addresses are exposed.
+ */
+int get_prev_bl_tag_list_diagnostics(u32 *countp, u32 *lowp, u32 *highp);
+
+/**
  * get_prev_bl_fdt_addr - When u-boot is chainloaded, get the address
  * of the FDT passed by the previous bootloader.
  *

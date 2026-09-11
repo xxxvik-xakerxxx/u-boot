@@ -28,6 +28,10 @@ static int preserved_fdt_error __section(".data") = -ENODATA;
 static int prev_fdt_x0_error __section(".data") = -ENODATA;
 static int prev_fdt_x2_error __section(".data") = -ENODATA;
 static int prev_tag_header_error __section(".data") = -ENODATA;
+static int prev_tag_list_error __section(".data") = -ENODATA;
+static u32 prev_tag_count __section(".data");
+static u32 prev_tag_mask_low __section(".data");
+static u32 prev_tag_mask_high __section(".data");
 
 #define MT6878_PREV_BL_FDT_MAX_SIZE	SZ_2M
 
@@ -167,6 +171,66 @@ int get_prev_bl_tag_header_error(void)
 	return prev_tag_header_error;
 }
 
+static int observe_mt6878_tag_list(u32 *countp, u32 *lowp, u32 *highp)
+{
+	const void *source;
+	size_t offset = 0;
+	u32 word, size, tag, count = 0, low = 0, high = 0;
+
+	*countp = 0;
+	*lowp = 0;
+	*highp = 0;
+	if (prev_tag_header_error)
+		return prev_tag_header_error;
+
+	/* Read headers only. ATF uses byte strides and a zero-size terminator. */
+	while (offset <= reg5 && reg5 - offset >= sizeof(word)) {
+		source = map_sysmem((phys_addr_t)reg0 + offset, sizeof(word));
+		if (!source)
+			return -ENOMEM;
+		memcpy(&word, source, sizeof(word));
+		unmap_sysmem(source);
+		size = le32_to_cpu(word);
+		if (!size) {
+			*countp = count;
+			*lowp = low;
+			*highp = high;
+			return 0;
+		}
+		if (count == 256)
+			return -E2BIG;
+		if (size < 2 * sizeof(word) || size > reg5 - offset)
+			return -EBADMSG;
+		source = map_sysmem((phys_addr_t)reg0 + offset + sizeof(word),
+				    sizeof(word));
+		if (!source)
+			return -ENOMEM;
+		memcpy(&word, source, sizeof(word));
+		unmap_sysmem(source);
+		tag = le32_to_cpu(word);
+		if ((tag >> 16) != 0x8861)
+			return -EOPNOTSUPP;
+		tag &= 0xffff;
+		if (tag < 32)
+			low |= 1U << tag;
+		else if (tag < 64)
+			high |= 1U << (tag - 32);
+		count++;
+		offset += size;
+	}
+	return -ENODATA;
+}
+
+int get_prev_bl_tag_list_diagnostics(u32 *countp, u32 *lowp, u32 *highp)
+{
+	if (!countp || !lowp || !highp)
+		return -EINVAL;
+	*countp = prev_tag_count;
+	*lowp = prev_tag_mask_low;
+	*highp = prev_tag_mask_high;
+	return prev_tag_list_error;
+}
+
 int get_preserved_prev_bl_fdt(phys_addr_t *addrp, size_t *sizep)
 {
 	size_t size;
@@ -212,6 +276,9 @@ int reserve_prev_bl_fdt(void)
 	preserved_fdt_size = 0;
 	preserved_fdt_error = -ENODATA;
 	prev_tag_header_error = observe_mt6878_tag_header();
+	prev_tag_list_error =
+		observe_mt6878_tag_list(&prev_tag_count, &prev_tag_mask_low,
+					&prev_tag_mask_high);
 	/* Record bounded validation results without publishing input addresses. */
 	prev_fdt_x0_error = reg0 ?
 		validate_mt6878_prev_bl_fdt(reg0, &size) : -ENODATA;

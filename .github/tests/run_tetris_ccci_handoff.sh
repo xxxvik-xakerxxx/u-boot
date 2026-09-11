@@ -23,3 +23,4 @@ cd "$root"
 	-o "$binary"
 "$binary"
 python3 .github/tests/test_tag_header.py
+python3 .github/tests/test_tag_list.py

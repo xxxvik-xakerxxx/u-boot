@@ -898,6 +898,56 @@ static void test_source_diagnostics(void)
 			"unobserved source errors are omitted, not reported as success");
 }
 
+static void test_tag_list_diagnostics(void)
+{
+	static const char * const names[] = {
+		"tag-list-header-count", "tag-list-id-mask-low",
+		"tag-list-id-mask-high",
+	};
+	const u32 expected[] = { 3, 0x80000002, 0x80004000 };
+	struct tetris_ccci_result result = {
+		.failure = TETRIS_CCCI_NO_FDT,
+		.source_checked = true,
+		.tag_list_count = 3,
+		.tag_list_low = 0x80000002,
+		.tag_list_high = 0x80004000,
+	};
+	struct fixture fixture;
+	const fdt32_t *value;
+	const char *text;
+	unsigned int i, pass;
+	int node, len;
+
+	fixture_init(&fixture, true, false);
+	for (pass = 0; pass < 3; pass++) {
+		result.tag_list_error = pass == 1 ? -EBADMSG : 0;
+		result.source_checked = pass != 2;
+		require(!tetris_ccci_publish_status(fixture.fdt, &result),
+			"publish tag header-list diagnostics");
+		node = fdt_path_offset(fixture.fdt,
+				       "/chosen/nothing,ccci-handoff-status");
+		value = fdt_getprop(fixture.fdt, node, "tag-list-header-error", &len);
+		if (pass != 2)
+			require(value && len == sizeof(*value) &&
+				fdt32_to_cpu(*value) == (u32)result.tag_list_error,
+				"tag-list errno is signed and observed");
+		else
+			require(!value, "unobserved list error omitted");
+		for (i = 0; i < ARRAY_SIZE(names); i++) {
+			value = fdt_getprop(fixture.fdt, node, names[i], &len);
+			if (!pass)
+				require(value && len == sizeof(*value) &&
+					fdt32_to_cpu(*value) == expected[i],
+					"valid header-list summaries preserved");
+			else
+				require(!value, "failed or unobserved summaries removed");
+		}
+		text = fdt_getprop(fixture.fdt, node, "payload-status", &len);
+		require(text && !strcmp(text, "not-checked"),
+			"header walk never validates payloads");
+	}
+}
+
 static void test_gnss_emi_handoff(void)
 {
 	fdt32_t zero = 0;
@@ -938,6 +988,7 @@ int main(void)
 	test_publish_no_space();
 	test_tag_failures();
 	test_source_diagnostics();
+	test_tag_list_diagnostics();
 	test_gnss_emi_handoff();
 	puts("Tetris CCCI handoff host tests: PASS");
 	return 0;

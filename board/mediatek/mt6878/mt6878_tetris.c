@@ -166,6 +166,10 @@ struct tetris_ccci_result {
 	int x0_error;
 	int x2_error;
 	int tag_header_error;
+	int tag_list_error;
+	u32 tag_list_count;
+	u32 tag_list_low;
+	u32 tag_list_high;
 	enum tetris_ccci_failure failure;
 };
 
@@ -1053,6 +1057,18 @@ static int tetris_ccci_publish_status(void *fdt,
 		if (!ret)
 			ret = fdt_setprop_u32(fdt, node, "tag-header-error",
 					      (u32)result->tag_header_error);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, "tag-list-header-error",
+					      (u32)result->tag_list_error);
+		if (!ret && !result->tag_list_error)
+			ret = fdt_setprop_u32(fdt, node, "tag-list-header-count",
+					      result->tag_list_count);
+		if (!ret && !result->tag_list_error)
+			ret = fdt_setprop_u32(fdt, node, "tag-list-id-mask-low",
+					      result->tag_list_low);
+		if (!ret && !result->tag_list_error)
+			ret = fdt_setprop_u32(fdt, node, "tag-list-id-mask-high",
+					      result->tag_list_high);
 	}
 	if (!ret)
 		ret = fdt_setprop_string(fdt, node, "failure", failure);
@@ -1444,6 +1460,10 @@ static int tetris_observe_ccci_handoff(void *fdt)
 	/* The validator clears result, so attach source diagnostics afterwards. */
 	result.source_checked = true;
 	result.tag_header_error = get_prev_bl_tag_header_error();
+	result.tag_list_error =
+		get_prev_bl_tag_list_diagnostics(&result.tag_list_count,
+						 &result.tag_list_low,
+						 &result.tag_list_high);
 	result.source_error = source_ret;
 	result.preservation_error =
 		get_prev_bl_fdt_diagnostics(&result.x0_error, &result.x2_error);
