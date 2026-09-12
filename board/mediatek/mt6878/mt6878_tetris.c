@@ -56,6 +56,7 @@ static u64 tetris_test_get_le64(const void *ptr)
 #define TETRIS_CCCI_MAX_INFO_SIZE	0x10000U
 #define TETRIS_CCCI_V1_DESC_SIZE	16U
 #define TETRIS_CCCI_V2_DESC_SIZE	32U
+#define TETRIS_CCCI_STOCK_V3_DESC_SIZE	48U
 #define TETRIS_CCCI_V1_NAME_SIZE	16U
 #define TETRIS_CCCI_V2_NAME_SIZE	64U
 #define TETRIS_CCCI_V1_TAG_SIZE		28U
@@ -424,7 +425,7 @@ static int tetris_ccci_read_descriptor(const void *fdt,
 				       struct tetris_ccci_result *result)
 {
 	const u8 *raw;
-	int len, node;
+	int len, node, i;
 
 	if (!fdt || fdt_check_header(fdt)) {
 		result->failure = TETRIS_CCCI_NO_FDT;
@@ -459,9 +460,25 @@ static int tetris_ccci_read_descriptor(const void *fdt,
 		desc->count = get_unaligned_le32(raw + 12);
 		desc->version = 1;
 	} else {
-		if (len != TETRIS_CCCI_V2_DESC_SIZE) {
+		if (len != TETRIS_CCCI_V2_DESC_SIZE &&
+		    len != TETRIS_CCCI_STOCK_V3_DESC_SIZE) {
 			result->failure = TETRIS_CCCI_BAD_DESCRIPTOR_SIZE;
 			return -EINVAL;
+		}
+		if (len == TETRIS_CCCI_STOCK_V3_DESC_SIZE) {
+			if (get_unaligned_le32(raw + 16) != 3) {
+				result->failure =
+					TETRIS_CCCI_UNSUPPORTED_DESCRIPTOR_VERSION;
+				return -EPROTONOSUPPORT;
+			}
+			/* Unknown extension state must never hide a load error. */
+			for (i = TETRIS_CCCI_V2_DESC_SIZE; i < len; i++) {
+				if (raw[i]) {
+					result->failure =
+						TETRIS_CCCI_BAD_DESCRIPTOR_STATUS;
+					return -EINVAL;
+				}
+			}
 		}
 		desc->base = get_unaligned_le64(raw);
 		desc->size = get_unaligned_le32(raw + 8);

@@ -195,6 +195,22 @@ static void fixture_set_v2_descriptor_word(struct fixture *fixture,
 		"replace v2 descriptor");
 }
 
+static void fixture_set_stock48_descriptor(struct fixture *fixture,
+					   u32 version, u8 tail_value)
+{
+	u8 raw[TETRIS_CCCI_STOCK_V3_DESC_SIZE] = { 0 };
+
+	put_le64(raw, fixture->base);
+	put_le32(raw + 8, fixture->descriptor_size);
+	put_le32(raw + 16, version);
+	put_le32(raw + 20, fixture->tag_count);
+	memset(raw + TETRIS_CCCI_V2_DESC_SIZE, tail_value,
+	       TETRIS_CCCI_STOCK_V3_DESC_SIZE - TETRIS_CCCI_V2_DESC_SIZE);
+	require(!fdt_setprop(fixture->fdt, modem_node(fixture),
+			     "ccci,modem_info_v2", raw, sizeof(raw)),
+		"set stock 48-byte descriptor");
+}
+
 static void fixture_put_md_block(u8 *entry, u32 offset, u32 size)
 {
 	put_le32(entry, offset);
@@ -506,6 +522,17 @@ static void test_valid_v3_descriptor(void)
 		"version 3 descriptor uses version 2 tag headers");
 }
 
+static void test_valid_stock48_descriptor(void)
+{
+	struct fixture fixture;
+	int ret;
+
+	fixture_init(&fixture, true, false);
+	fixture_set_stock48_descriptor(&fixture, 3, 0);
+	require(observe(&fixture, &ret) == TETRIS_CCCI_OK && !ret,
+		"zero-tail stock 48-byte v3 descriptor accepted");
+}
+
 static void test_descriptor_failures(void)
 {
 	const struct tetris_ccci_access access = { 0 };
@@ -566,6 +593,16 @@ static void test_descriptor_failures(void)
 			       fixture.descriptor_size, fixture.tag_count, 4);
 	expect_failure(&fixture, TETRIS_CCCI_UNSUPPORTED_DESCRIPTOR_VERSION,
 		       false, "unsupported descriptor version");
+
+	fixture_init(&fixture, true, false);
+	fixture_set_stock48_descriptor(&fixture, 2, 0);
+	expect_failure(&fixture, TETRIS_CCCI_UNSUPPORTED_DESCRIPTOR_VERSION,
+		       false, "stock 48-byte descriptor must be version 3");
+
+	fixture_init(&fixture, true, false);
+	fixture_set_stock48_descriptor(&fixture, 3, 1);
+	expect_failure(&fixture, TETRIS_CCCI_BAD_DESCRIPTOR_STATUS, false,
+		       "stock 48-byte descriptor rejects nonzero extension tail");
 
 	fixture_init(&fixture, true, false);
 	require(!fdt_del_mem_rsv(fixture.fdt, 0), "remove memreserve");
@@ -982,6 +1019,7 @@ int main(void)
 	test_valid(false, false);
 	test_valid_v5();
 	test_valid_v3_descriptor();
+	test_valid_stock48_descriptor();
 	test_descriptor_failures();
 	test_invalid_status();
 	test_payload_failures();

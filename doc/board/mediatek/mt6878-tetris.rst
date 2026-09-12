@@ -57,3 +57,14 @@ The hardware buttons are also exposed as the U-Boot keyboard:
 Use ``fastboot oem board:boot_pmos`` to start postmarketOS manually from
 U-Boot fastboot. Use ``fastboot oem run:button list`` followed by
 ``fastboot oem console`` to inspect the raw button states during bring-up.
+
+LK handoff observation
+----------------------
+
+When U-Boot is entered from the previous LK stage, it observes the previous
+FDT for the Nothing/MediaTek CCCI modem handoff and publishes a sanitized
+status node under ``/chosen`` for Linux diagnostics. This target accepts the
+standard 32-byte ``ccci,modem_info_v2`` descriptor and the stock 48-byte
+version 3 form only when the extra tail is all zero. U-Boot does not publish
+physical modem addresses and does not start the modem; modem runtime bring-up
+must still be validated from Linux.
