@@ -68,3 +68,18 @@ standard 32-byte ``ccci,modem_info_v2`` descriptor and the stock 48-byte
 version 3 form only when the extra tail is all zero. U-Boot does not publish
 physical modem addresses and does not start the modem; modem runtime bring-up
 must still be validated from Linux.
+
+B4.0 variant diagnostic image
+-----------------------------
+
+This diagnostic branch intentionally enters U-Boot fastboot by default instead
+of booting Linux. It is meant to distinguish an early U-Boot crash from a later
+Linux handoff failure on older Nothing OS firmware such as B4.0. If U-Boot
+fastboot enumerates, use ``fastboot oem board:boot_pmos_safe`` first so Linux
+starts with radio modules disabled.
+
+When the secure monitor rejects the conninfra/GNSS EMI SMC registration, this
+branch prints the failing status and continues the diagnostic boot instead of
+resetting immediately. That fallback is for evidence collection only; radio,
+GNSS and modem support still require firmware-specific validation before being
+advertised as working.

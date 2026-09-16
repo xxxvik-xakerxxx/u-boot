@@ -1183,6 +1183,9 @@ int board_late_init(void)
 						      TETRIS_WDT_NONRST_REG2);
 	u32 mode = readl(reboot_mode) & TETRIS_REBOOT_MODE_MASK;
 
+	printf("Tetris: B4.0 diagnostic build entering U-Boot fastboot\n");
+	env_set("bootcmd", "run fastboot");
+
 	if (mode != TETRIS_REBOOT_MODE_BOOTLOADER)
 		return 0;
 
@@ -1514,8 +1517,10 @@ void board_prep_linux(struct bootm_headers *images)
 	tetris_observe_ccci_handoff(fdt);
 
 	ret = tetris_prepare_connsys_emi(fdt);
-	if (ret)
-		panic("Tetris: refusing Linux boot without conninfra EMI mapping\n");
+	if (ret) {
+		printf("Tetris: conninfra EMI mapping failed: %d\n", ret);
+		printf("Tetris: continuing diagnostic boot; keep radio modules disabled\n");
+	}
 }
 
 static int tetris_boot_pmos(const char *extra_bootargs)
