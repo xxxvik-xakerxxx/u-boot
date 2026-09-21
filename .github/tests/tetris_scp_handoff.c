@@ -288,6 +288,58 @@ static void test_bad_arguments_and_disabled_call(void)
 		"unknown failure name");
 }
 
+static void test_region_info_decoder(void)
+{
+	struct tetris_scp_region_snapshot snapshot;
+	u32 words[TETRIS_SCP_REGION_INFO_WORDS] = {
+		0x1c400000, 0x20000, 0xb8000000, 0x400000,
+		0x8e000000, 0x100000, 0x8e400000,
+		TETRIS_SCP_REGION_INFO_SIZE,
+	};
+
+	require(!tetris_scp_decode_region_info(words, &snapshot),
+		"valid region-info decoded");
+	require(snapshot.valid && snapshot.failure == TETRIS_SCP_REGION_OK,
+		"valid region-info classified");
+	require(snapshot.loader.base == 0x1c400000 &&
+		snapshot.firmware.base == 0xb8000000 &&
+		snapshot.dram.base == 0x8e000000,
+		"region-info ranges retained");
+
+	memset(words, 0, sizeof(words));
+	require(tetris_scp_decode_region_info(words, &snapshot) == -ENODATA &&
+		snapshot.failure == TETRIS_SCP_REGION_ZERO,
+		"zero handoff rejected");
+
+	words[7] = TETRIS_SCP_REGION_INFO_SIZE - 4;
+	require(tetris_scp_decode_region_info(words, &snapshot) == -EPROTO &&
+		snapshot.failure == TETRIS_SCP_REGION_TOO_SMALL,
+		"short handoff rejected");
+
+	words[0] = 0xfffffff0;
+	words[1] = 0x100;
+	words[2] = 0xb8000000;
+	words[3] = 0x400000;
+	words[7] = TETRIS_SCP_REGION_INFO_SIZE;
+	require(tetris_scp_decode_region_info(words, &snapshot) == -EINVAL &&
+		snapshot.failure == TETRIS_SCP_REGION_BAD_LOADER,
+		"wrapping loader rejected");
+
+	words[0] = 0x1c400000;
+	words[1] = 0x20000;
+	words[4] = 0x8e000000;
+	words[5] = 0x40000001;
+	words[6] = 0x8e400000;
+	require(tetris_scp_decode_region_info(words, &snapshot) == -EINVAL &&
+		snapshot.failure == TETRIS_SCP_REGION_BAD_DRAM,
+		"overflowing recovery span rejected");
+
+	require(tetris_scp_decode_region_info(NULL, &snapshot) == -EINVAL,
+		"null words rejected");
+	require(tetris_scp_decode_region_info(words, NULL) == -EINVAL,
+		"null snapshot rejected");
+}
+
 int main(void)
 {
 	test_valid_slots_and_read_only_fdt();
@@ -295,6 +347,7 @@ int main(void)
 	test_region_info_evidence();
 	test_carveout_evidence();
 	test_bad_arguments_and_disabled_call();
+	test_region_info_decoder();
 	puts("tetris SCP handoff inventory tests: PASS");
 	return 0;
 }

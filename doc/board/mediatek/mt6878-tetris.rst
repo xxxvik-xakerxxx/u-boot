@@ -57,3 +57,14 @@ The hardware buttons are also exposed as the U-Boot keyboard:
 Use ``fastboot oem board:boot_pmos`` to start postmarketOS manually from
 U-Boot fastboot. Use ``fastboot oem run:button list`` followed by
 ``fastboot oem console`` to inspect the raw button states during bring-up.
+
+SCP handoff observation
+-----------------------
+
+Before Linux starts, U-Boot reads the 56-byte ``scp_region_info`` record at
+the Nothing OS 4.1 TCM offset and validates loader, firmware and optional DRAM
+recovery ranges with bounded arithmetic. It publishes only
+``nothing,scp-region-info-status`` and ``nothing,scp-region-info-size`` under
+``/chosen``. It does not copy firmware, expose physical addresses, or start,
+stop, wake, reset, clock or power SCP. A zero or malformed handoff remains a
+normal fail-closed diagnostic result and does not block Linux boot.

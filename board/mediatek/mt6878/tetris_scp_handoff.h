@@ -16,6 +16,8 @@ typedef __UINT64_TYPE__ u64;
 #endif
 
 #define TETRIS_SCP_IDENTITY_SIZE	32U
+#define TETRIS_SCP_REGION_INFO_WORDS	14U
+#define TETRIS_SCP_REGION_INFO_SIZE	(TETRIS_SCP_REGION_INFO_WORDS * 4U)
 
 enum tetris_scp_slot {
 	TETRIS_SCP_SLOT_UNKNOWN,
@@ -84,6 +86,25 @@ struct tetris_scp_region_info_observation {
 	struct tetris_scp_range firmware;
 };
 
+enum tetris_scp_region_failure {
+	TETRIS_SCP_REGION_OK,
+	TETRIS_SCP_REGION_ZERO,
+	TETRIS_SCP_REGION_TOO_SMALL,
+	TETRIS_SCP_REGION_BAD_LOADER,
+	TETRIS_SCP_REGION_BAD_FIRMWARE,
+	TETRIS_SCP_REGION_BAD_DRAM,
+};
+
+struct tetris_scp_region_snapshot {
+	bool valid;
+	enum tetris_scp_region_failure failure;
+	u32 structure_size;
+	struct tetris_scp_range loader;
+	struct tetris_scp_range firmware;
+	struct tetris_scp_range dram;
+	u32 dram_backup_start;
+};
+
 struct tetris_scp_inventory {
 	bool valid;
 	enum tetris_scp_failure failure;
@@ -105,6 +126,11 @@ int tetris_scp_validate_inventory(const void *fdt,
 	const struct tetris_scp_region_info_observation *region_info,
 	struct tetris_scp_inventory *inventory);
 const char *tetris_scp_failure_name(enum tetris_scp_failure failure);
+int tetris_scp_decode_region_info(
+	const u32 words[TETRIS_SCP_REGION_INFO_WORDS],
+	struct tetris_scp_region_snapshot *snapshot);
+const char *tetris_scp_region_failure_name(
+	enum tetris_scp_region_failure failure);
 
 /* Explicitly fail closed until the LK/SCP handoff ABI is proven. */
 #ifdef TETRIS_SCP_HANDOFF_HOST_TEST

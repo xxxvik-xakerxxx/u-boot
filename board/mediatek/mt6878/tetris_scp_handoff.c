@@ -18,6 +18,15 @@
 #define TETRIS_SCP_SHARE_MIN	0x11a9b00ULL
 #define TETRIS_SCP_SHARE_LIMIT	0x90000000ULL
 
+static const char *const tetris_scp_region_failure_names[] = {
+	[TETRIS_SCP_REGION_OK] = "ok",
+	[TETRIS_SCP_REGION_ZERO] = "zero",
+	[TETRIS_SCP_REGION_TOO_SMALL] = "too-small",
+	[TETRIS_SCP_REGION_BAD_LOADER] = "bad-loader",
+	[TETRIS_SCP_REGION_BAD_FIRMWARE] = "bad-firmware",
+	[TETRIS_SCP_REGION_BAD_DRAM] = "bad-dram",
+};
+
 static const char *const tetris_scp_failure_names[] = {
 	[TETRIS_SCP_OK] = "ok",
 	[TETRIS_SCP_BAD_ARGUMENT] = "bad-argument",
@@ -56,6 +65,85 @@ const char *tetris_scp_failure_name(enum tetris_scp_failure failure)
 		return "unknown";
 
 	return tetris_scp_failure_names[failure];
+}
+
+const char *tetris_scp_region_failure_name(
+	enum tetris_scp_region_failure failure)
+{
+	if (failure < 0 ||
+	    failure >= (int)(sizeof(tetris_scp_region_failure_names) /
+			     sizeof(tetris_scp_region_failure_names[0])) ||
+	    !tetris_scp_region_failure_names[failure])
+		return "unknown";
+
+	return tetris_scp_region_failure_names[failure];
+}
+
+static bool tetris_scp_u32_range_valid(u32 start, u32 size)
+{
+	return start && size && start <= ~(u32)0 - size;
+}
+
+int tetris_scp_decode_region_info(
+	const u32 words[TETRIS_SCP_REGION_INFO_WORDS],
+	struct tetris_scp_region_snapshot *snapshot)
+{
+	u32 rounded, span;
+
+	if (!words || !snapshot)
+		return -EINVAL;
+
+	memset(snapshot, 0, sizeof(*snapshot));
+	snapshot->failure = TETRIS_SCP_REGION_ZERO;
+	snapshot->loader.base = words[0];
+	snapshot->loader.size = words[1];
+	snapshot->firmware.base = words[2];
+	snapshot->firmware.size = words[3];
+	snapshot->dram.base = words[4];
+	snapshot->dram.size = words[5];
+	snapshot->dram_backup_start = words[6];
+	snapshot->structure_size = words[7];
+
+	if (!snapshot->structure_size)
+		return -ENODATA;
+	if (snapshot->structure_size < TETRIS_SCP_REGION_INFO_SIZE) {
+		snapshot->failure = TETRIS_SCP_REGION_TOO_SMALL;
+		return -EPROTO;
+	}
+	if (!tetris_scp_u32_range_valid(snapshot->loader.base,
+					snapshot->loader.size)) {
+		snapshot->failure = TETRIS_SCP_REGION_BAD_LOADER;
+		return -EINVAL;
+	}
+	if (!tetris_scp_u32_range_valid(snapshot->firmware.base,
+					snapshot->firmware.size)) {
+		snapshot->failure = TETRIS_SCP_REGION_BAD_FIRMWARE;
+		return -EINVAL;
+	}
+	if (snapshot->dram.base || snapshot->dram.size ||
+	    snapshot->dram_backup_start) {
+		if (!tetris_scp_u32_range_valid(snapshot->dram.base,
+						snapshot->dram.size) ||
+		    snapshot->dram.size > ~(u32)0 - 1023U) {
+			snapshot->failure = TETRIS_SCP_REGION_BAD_DRAM;
+			return -EINVAL;
+		}
+		rounded = (snapshot->dram.size + 1023U) & ~1023U;
+		if (rounded > ~(u32)0 / 4U) {
+			snapshot->failure = TETRIS_SCP_REGION_BAD_DRAM;
+			return -EINVAL;
+		}
+		span = rounded * 4U;
+		if (!snapshot->dram_backup_start ||
+		    snapshot->dram_backup_start > ~(u32)0 - span) {
+			snapshot->failure = TETRIS_SCP_REGION_BAD_DRAM;
+			return -EINVAL;
+		}
+	}
+
+	snapshot->failure = TETRIS_SCP_REGION_OK;
+	snapshot->valid = true;
+	return 0;
 }
 
 static bool tetris_scp_range_end(const struct tetris_scp_range *range,

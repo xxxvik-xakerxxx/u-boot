@@ -175,12 +175,13 @@ endchoice
 config TETRIS_SCP_HANDOFF_INVENTORY
 	bool "Build Nothing Tetris SCP handoff inventory helper"
 	depends on TARGET_MT6878
-	default n
+	default y
 	help
 	  Build a fail-closed validator for externally decoded SCP slot,
-	  partition identity, carveout, and scp_region_info observations. The
-	  board call site remains disabled until the LK/SCP handoff ABI is
-	  independently established; this option never starts or resets SCP.
+	  partition identity, carveout, and scp_region_info observations. On
+	  Tetris the board reads the documented 56-byte region-info record from
+	  TCM and publishes only its validation status and structure size. This
+	  option never starts, stops, wakes, or resets SCP.
 
 if ARM64
 

@@ -77,6 +77,8 @@ static u64 tetris_test_get_le64(const void *ptr)
 #define TETRIS_CCCI_MD_CHECK_MAGIC_SIZE	12U
 #define TETRIS_CCCI_MD_TYPE_MAX		14U
 #define TETRIS_GPS_EMI_BASE		0x86a00000ULL
+#define TETRIS_SCP_TCM_BASE		0x1c400000ULL
+#define TETRIS_SCP_REGION_INFO_OFFSET	0x4U
 #define TETRIS_CCCI_MAX_TAGS \
 	(TETRIS_CCCI_MAX_INFO_SIZE / TETRIS_CCCI_V1_TAG_SIZE)
 
@@ -1436,6 +1438,45 @@ static int tetris_observe_ccci_handoff(void *fdt)
 	return ret;
 }
 
+static int tetris_observe_scp_region_info(void *fdt)
+{
+	struct tetris_scp_region_snapshot snapshot;
+	const char *status;
+	void *mapped;
+	u32 words[TETRIS_SCP_REGION_INFO_WORDS];
+	int chosen, i, ret;
+
+	mapped = map_sysmem(TETRIS_SCP_TCM_BASE +
+			    TETRIS_SCP_REGION_INFO_OFFSET,
+			    TETRIS_SCP_REGION_INFO_SIZE);
+	if (!mapped)
+		return -ENOMEM;
+	for (i = 0; i < TETRIS_SCP_REGION_INFO_WORDS; i++)
+		words[i] = readl((u8 *)mapped + i * sizeof(u32));
+	unmap_sysmem(mapped);
+
+	ret = tetris_scp_decode_region_info(words, &snapshot);
+	status = tetris_scp_region_failure_name(snapshot.failure);
+	chosen = fdt_path_offset(fdt, "/chosen");
+	if (chosen >= 0) {
+		int publish_ret;
+
+		publish_ret = fdt_setprop_string(fdt, chosen,
+				"nothing,scp-region-info-status", status);
+		if (!publish_ret)
+			publish_ret = fdt_setprop_u32(fdt, chosen,
+					"nothing,scp-region-info-size",
+					snapshot.structure_size);
+		if (publish_ret)
+			printf("Tetris: SCP region-info status publication failed: %d\n",
+			       publish_ret);
+	}
+
+	printf("Tetris: SCP region-info status=%s size=%u\n", status,
+	       snapshot.structure_size);
+	return ret;
+}
+
 void board_prep_linux(struct bootm_headers *images)
 {
 	int ret;
@@ -1449,6 +1490,9 @@ void board_prep_linux(struct bootm_headers *images)
 		 */
 		ret = tetris_scp_handoff_inventory_disabled();
 		printf("Tetris: SCP handoff inventory disabled: %d\n", ret);
+		ret = tetris_observe_scp_region_info(fdt);
+		if (ret)
+			printf("Tetris: SCP region-info unavailable: %d\n", ret);
 	}
 
 	ret = tetris_handoff_devinfo(fdt);
