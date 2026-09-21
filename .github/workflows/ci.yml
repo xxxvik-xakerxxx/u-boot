@@ -234,6 +234,7 @@ jobs:
               '"nothing,%s-container-status"',
               '"nothing,%s-container-size"',
               'static void tetris_observe_scp_containers(void *fdt)',
+              'blk_get_desc(UCLASS_SCSI, 2, &desc)',
           ):
               if required not in scp_runtime:
                   raise SystemExit(f"missing bounded SCP observation: {required}")
@@ -249,6 +250,7 @@ jobs:
               "dma_",
               "blk_dwrite(",
               "blk_write(",
+              "blk_get_by_device(",
           ):
               if forbidden in scp_runtime:
                   raise SystemExit(

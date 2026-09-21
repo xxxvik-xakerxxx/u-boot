@@ -1571,19 +1571,14 @@ static int tetris_observe_scp_container(void *fdt, struct blk_desc *desc,
 
 static void tetris_observe_scp_containers(void *fdt)
 {
-	struct udevice *dev;
 	struct blk_desc *desc;
 	int ret;
 
-	ret = blk_get_device(UCLASS_SCSI, 2, &dev);
+	ret = blk_get_desc(UCLASS_SCSI, 2, &desc);
 	if (ret) {
 		printf("Tetris: SCP container storage unavailable: %d\n", ret);
 		return;
 	}
-	desc = blk_get_by_device(dev);
-	if (!desc)
-		return;
-
 	ret = tetris_observe_scp_container(fdt, desc, "scp_a");
 	if (ret)
 		printf("Tetris: scp_a container unavailable: %d\n", ret);
