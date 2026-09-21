@@ -286,13 +286,13 @@ int tetris_scp_prepare_component(struct tetris_scp_crypto *crypto, void *page,
 	    (crypto->state != TETRIS_SCP_CRYPTO_NEW &&
 	     crypto->state != TETRIS_SCP_CRYPTO_READY))
 		return -EINVAL;
+	ret = tetris_scp_crypto_check_image(crypto_ops, input->image,
+					  input->size, input->capacity);
+	if (ret)
+		goto out;
 	ret = tetris_scp_authenticate(input->cert1, input->cert1_size,
 		input->cert2, input->cert2_size, input->image, input->size,
 		root_pin, security_ops, &metadata);
-	if (ret)
-		goto out;
-	ret = tetris_scp_crypto_check_image(crypto_ops, input->image,
-					  input->size, input->capacity);
 	if (ret)
 		goto out;
 	if (crypto->state == TETRIS_SCP_CRYPTO_NEW) {

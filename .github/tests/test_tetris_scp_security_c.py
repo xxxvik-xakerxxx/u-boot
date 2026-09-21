@@ -206,6 +206,7 @@ class PrepareComponentTest(unittest.TestCase):
 
         self.crypto_ops = CryptoOps(smc, flush, invalidate, sha, physical, 64)
         self.context = Crypto()
+        self.security_ops = ops
 
     def call(self, pin=None, capacity=512, offset=0):
         cert1 = c.create_string_buffer(self.parts[1])
@@ -215,7 +216,7 @@ class PrepareComponentTest(unittest.TestCase):
                               c.addressof(cert1), len(self.parts[1]),
                               c.addressof(cert2), len(self.parts[2]))
         return prepare(c.byref(self.context), self.page, c.byref(self.crypto_ops),
-                       c.byref(ops), c.byref(component),
+                       c.byref(self.security_ops), c.byref(component),
                        bytes.fromhex(self.fixture.root_pin) if pin is None else pin)
 
     def smcs(self):
@@ -261,6 +262,19 @@ class PrepareComponentTest(unittest.TestCase):
         self.assertNotEqual(self.call(), 0)
         self.assertEqual(self.smcs(), [0xc200010b])
         self.assertEqual(self.context.state, 2)
+
+    def test_short_capacity_rejected_before_authentication_reads(self):
+        reads = []
+
+        @Hash
+        def counted_hash(data, size, out):
+            reads.append(size)
+            digest(data, size, out)
+
+        self.security_ops = Ops(counted_hash, verify)
+        self.assertNotEqual(self.call(capacity=16), 0)
+        self.assertEqual(reads, [])
+        self.assertEqual(self.events, [])
 
     def test_secure_decrypt_failure_erases_image_and_cannot_retry(self):
         self.smc_error = 1
