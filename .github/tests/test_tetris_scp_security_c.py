@@ -48,6 +48,35 @@ authenticate = library.tetris_scp_authenticate
 authenticate.argtypes = [c.c_void_p, c.c_size_t] * 3 + [c.c_void_p, c.POINTER(Ops), c.c_void_p]
 authenticate.restype = c.c_int
 
+Smc = c.CFUNCTYPE(c.c_uint64, c.c_uint32, c.c_uint64, c.c_uint64)
+Cache = c.CFUNCTYPE(None, c.c_void_p, c.c_size_t)
+CryptoHash = c.CFUNCTYPE(None, c.c_void_p, c.c_uint32, c.c_void_p)
+Physical = c.CFUNCTYPE(c.c_uint64, c.c_void_p)
+
+
+class CryptoOps(c.Structure):
+    _fields_ = [("smc", Smc), ("flush", Cache), ("invalidate", Cache),
+                ("sha256", CryptoHash), ("physical", Physical),
+                ("cache_alignment", c.c_size_t)]
+
+
+class Crypto(c.Structure):
+    _fields_ = [("ops", c.POINTER(CryptoOps)), ("page", c.c_void_p),
+                ("state", c.c_int), ("secure_error", c.c_uint64)]
+
+
+class Component(c.Structure):
+    _fields_ = [("image", c.c_void_p), ("size", c.c_size_t),
+                ("capacity", c.c_size_t), ("cert1", c.c_void_p),
+                ("cert1_size", c.c_size_t), ("cert2", c.c_void_p),
+                ("cert2_size", c.c_size_t)]
+
+
+prepare = library.tetris_scp_prepare_component
+prepare.argtypes = [c.POINTER(Crypto), c.c_void_p, c.POINTER(CryptoOps),
+                    c.POINTER(Ops), c.POINTER(Component), c.c_void_p]
+prepare.restype = c.c_int
+
 
 class RuntimeSecurityTest(unittest.TestCase):
     @classmethod
@@ -123,6 +152,129 @@ class RuntimeSecurityTest(unittest.TestCase):
             parts = original.copy()
             parts[index] += b"\0"
             self.assertNotEqual(self.call(parts)[0], 0)
+
+
+class PrepareComponentTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        fixtures.SecurityTest.setUpClass()
+        cls.fixture = fixtures.SecurityTest()
+
+    def setUp(self):
+        self.parts = self.fixture.parts()
+        self.plain = b"P" * len(self.parts[0])
+        self.parts[2] = self.fixture.cert(self.fixture.key, self.fixture.key, [
+            ("2.1", fixtures.univ.BitString.fromOctetString(
+                hashlib.sha256(self.parts[0]).digest())),
+            ("2.8", fixtures.univ.BitString.fromOctetString(b"w" * 32)),
+            ("4.2", fixtures.univ.BitString.fromOctetString(
+                hashlib.sha256(self.plain).digest()))])
+        self.storage = c.create_string_buffer(8192)
+        self.page = (c.addressof(self.storage) + 4095) & ~4095
+        self.image_storage = c.create_string_buffer(1024)
+        self.image = (c.addressof(self.image_storage) + 63) & ~63
+        self.image_pa = 0x50000000
+        self.events = []
+        self.smc_error = 0
+        self.init_error = 0
+        self.corrupt_plain = False
+
+        @Smc
+        def smc(function, arg1, arg2):
+            self.events.append(("smc", function, arg1, arg2))
+            if function == 0xc2000133:
+                c.memmove(self.image, b"X" * len(self.plain) if self.corrupt_plain
+                          else self.plain, len(self.plain))
+                return self.smc_error
+            return self.init_error
+
+        @Cache
+        def flush(address, size):
+            self.events.append(("flush", address, size))
+
+        @Cache
+        def invalidate(address, size):
+            self.events.append(("invalidate", address, size))
+
+        @CryptoHash
+        def sha(data, size, out):
+            digest(data, size, out)
+
+        @Physical
+        def physical(address):
+            return 0x48401000 if address == self.page else self.image_pa
+
+        self.crypto_ops = CryptoOps(smc, flush, invalidate, sha, physical, 64)
+        self.context = Crypto()
+
+    def call(self, pin=None, capacity=512, offset=0):
+        cert1 = c.create_string_buffer(self.parts[1])
+        cert2 = c.create_string_buffer(self.parts[2])
+        c.memmove(self.image + offset, self.parts[0], len(self.parts[0]))
+        component = Component(self.image + offset, len(self.parts[0]), capacity,
+                              c.addressof(cert1), len(self.parts[1]),
+                              c.addressof(cert2), len(self.parts[2]))
+        return prepare(c.byref(self.context), self.page, c.byref(self.crypto_ops),
+                       c.byref(ops), c.byref(component),
+                       bytes.fromhex(self.fixture.root_pin) if pin is None else pin)
+
+    def smcs(self):
+        return [event[1] for event in self.events if event[0] == "smc"]
+
+    def test_authenticated_prepare_and_reuse(self):
+        self.assertEqual(self.call(), 0)
+        self.assertEqual(self.context.state, 1)
+        self.assertEqual(c.string_at(self.image, len(self.plain)), self.plain)
+        self.assertEqual(self.smcs(), [0xc200010b, 0xc2000133])
+        self.assertEqual(c.string_at(self.page + 0x40, 32), bytes(32))
+        self.assertEqual(c.string_at(self.page + 0x100, 32), bytes(32))
+        self.assertEqual(self.call(), 0)
+        self.assertEqual(self.smcs(), [0xc200010b, 0xc2000133, 0xc2000133])
+
+    def test_bad_pin_never_calls_secure_monitor(self):
+        self.assertNotEqual(self.call(pin=bytes(32)), 0)
+        self.assertEqual(self.events, [])
+        self.assertEqual(self.context.state, 2)
+        self.assertEqual(c.string_at(self.image, len(self.parts[0])), self.parts[0])
+
+    def test_bad_signature_never_calls_secure_monitor(self):
+        self.parts[2] = self.parts[2][:-1] + bytes([self.parts[2][-1] ^ 1])
+        self.assertNotEqual(self.call(), 0)
+        self.assertEqual(self.events, [])
+
+    def test_invalid_memory_never_calls_secure_monitor(self):
+        for pa, align, capacity, offset in (
+                (0x50000000, 64, 16, 0), (0x50000000, 64, 512, 1),
+                (0x48401000, 64, 512, 0), (0x100000000, 64, 512, 0),
+                (0xffffffc0, 64, 512, 0), (0x50000000, 0, 512, 0),
+                (0x50000000, 3, 512, 0)):
+            with self.subTest(pa=pa, align=align, capacity=capacity, offset=offset):
+                self.context = Crypto()
+                self.image_pa = pa
+                self.crypto_ops.cache_alignment = align
+                self.assertNotEqual(self.call(capacity=capacity, offset=offset), 0)
+                self.assertEqual(self.events, [])
+
+    def test_secure_init_failure_cannot_retry(self):
+        self.init_error = 1
+        self.assertNotEqual(self.call(), 0)
+        self.assertNotEqual(self.call(), 0)
+        self.assertEqual(self.smcs(), [0xc200010b])
+        self.assertEqual(self.context.state, 2)
+
+    def test_secure_decrypt_failure_erases_image_and_cannot_retry(self):
+        self.smc_error = 1
+        self.assertNotEqual(self.call(), 0)
+        self.assertEqual(c.string_at(self.image, 320), bytes(320))
+        self.assertEqual(self.context.state, 2)
+        self.assertNotEqual(self.call(), 0)
+        self.assertEqual(self.smcs(), [0xc200010b, 0xc2000133])
+
+    def test_wrong_plaintext_erases_image(self):
+        self.corrupt_plain = True
+        self.assertNotEqual(self.call(), 0)
+        self.assertEqual(c.string_at(self.image, 320), bytes(320))
+        self.assertEqual(self.context.state, 2)
 
 
 if __name__ == "__main__":

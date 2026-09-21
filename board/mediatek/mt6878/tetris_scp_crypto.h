@@ -50,6 +50,8 @@ struct tetris_scp_crypto {
 int tetris_scp_crypto_init(struct tetris_scp_crypto *ctx, void *page,
 			   size_t page_size,
 			   const struct tetris_scp_crypto_ops *ops);
+int tetris_scp_crypto_check_image(const struct tetris_scp_crypto_ops *ops,
+				 void *image, size_t size, size_t capacity);
 int tetris_scp_crypto_decrypt(struct tetris_scp_crypto *ctx, void *image,
 			      u32 size, size_t capacity, u32 selector,
 			      const u8 wrapped[32], const u8 ciphertext_sha256[32],

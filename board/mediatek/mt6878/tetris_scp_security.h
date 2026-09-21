@@ -18,6 +18,30 @@ struct tetris_scp_security_metadata {
 	unsigned char wrapped[32];
 };
 
+struct tetris_scp_crypto;
+struct tetris_scp_crypto_ops;
+
+struct tetris_scp_component_input {
+	void *image;
+	size_t size;
+	size_t capacity;
+	const void *cert1;
+	size_t cert1_size;
+	const void *cert2;
+	size_t cert2_size;
+};
+
+/*
+ * Authenticate before any secure call, then decrypt and check plaintext.
+ * Caller still proves ATF compatibility and exclusively owns/reserves buffers.
+ * No TCM copy, reset, region-info publication or firmware execution occurs.
+ */
+int tetris_scp_prepare_component(struct tetris_scp_crypto *crypto, void *page,
+		const struct tetris_scp_crypto_ops *crypto_ops,
+		const struct tetris_scp_security_ops *security_ops,
+		const struct tetris_scp_component_input *input,
+		const unsigned char root_pin[32]);
+
 /* Caller supplies an independent root pin, not one extracted from cert1. */
 int tetris_scp_authenticate(const void *cert1, size_t size1,
 			    const void *cert2, size_t size2,

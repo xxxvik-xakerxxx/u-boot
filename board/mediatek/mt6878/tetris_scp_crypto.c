@@ -69,6 +69,32 @@ int tetris_scp_crypto_init(struct tetris_scp_crypto *ctx, void *page,
 	return 0;
 }
 
+int tetris_scp_crypto_check_image(const struct tetris_scp_crypto_ops *ops,
+				 void *image, size_t size, size_t capacity)
+{
+	u64 address;
+	size_t align, span;
+
+	if (!ops || !ops->physical || !image || !size ||
+	    size > TETRIS_SCP_CRYPTO_MAX_IMAGE || (size & 15))
+		return -EINVAL;
+	align = ops->cache_alignment;
+	if (!align || (align & (align - 1)) ||
+	    align > TETRIS_SCP_CRYPTO_PAGE_SIZE)
+		return -EINVAL;
+	span = (size + align - 1) & ~(align - 1);
+	if (capacity < span || ((unsigned long)image & (align - 1)))
+		return -EINVAL;
+	address = ops->physical(image);
+	if (address < 0x40000000ULL || address >= (1ULL << 32) ||
+	    span > (1ULL << 32) - address || (address & (align - 1)))
+		return -ERANGE;
+	if (address < TETRIS_SCP_CRYPTO_PAGE_PA + TETRIS_SCP_CRYPTO_PAGE_SIZE &&
+	    address + span > TETRIS_SCP_CRYPTO_PAGE_PA)
+		return -EINVAL;
+	return 0;
+}
+
 int tetris_scp_crypto_decrypt(struct tetris_scp_crypto *ctx, void *image,
 			      u32 size, size_t capacity, u32 selector,
 			      const u8 wrapped[32], const u8 ciphertext_sha256[32],
@@ -76,7 +102,7 @@ int tetris_scp_crypto_decrypt(struct tetris_scp_crypto *ctx, void *image,
 {
 	u8 expected[32], digest[32], material[32];
 	const struct tetris_scp_crypto_ops *ops;
-	u64 address, end;
+	u64 address;
 	size_t span, align;
 	u8 *page;
 	int ret = 0;
@@ -89,18 +115,12 @@ int tetris_scp_crypto_decrypt(struct tetris_scp_crypto *ctx, void *image,
 	if (selector != 1)
 		return -EOPNOTSUPP;
 	ops = ctx->ops;
+	ret = tetris_scp_crypto_check_image(ops, image, size, capacity);
+	if (ret)
+		return ret;
 	align = ops->cache_alignment;
 	span = (size + align - 1) & ~(align - 1);
-	if (capacity < span || ((unsigned long)image & (align - 1)))
-		return -EINVAL;
 	address = ops->physical(image);
-	if (address < 0x40000000ULL || address >= (1ULL << 32) ||
-	    span > (1ULL << 32) - address || (address & (align - 1)))
-		return -ERANGE;
-	end = address + span;
-	if (address < TETRIS_SCP_CRYPTO_PAGE_PA + TETRIS_SCP_CRYPTO_PAGE_SIZE &&
-	    end > TETRIS_SCP_CRYPTO_PAGE_PA)
-		return -EINVAL;
 	ops->sha256(image, size, digest);
 	if (!digest_equal(digest, ciphertext_sha256)) {
 		erase(digest, sizeof(digest));

@@ -180,6 +180,7 @@ config TETRIS_SCP_SECURITY
 	select RSA
 	select RSA_VERIFY_WITH_PKEY
 	select RSASSA_PSS
+	select TETRIS_SCP_CRYPTO
 	help
 	  Verify MediaTek SCP certificates and encrypted payloads against a
 	  caller-provisioned root pin. No automatic loader is enabled.

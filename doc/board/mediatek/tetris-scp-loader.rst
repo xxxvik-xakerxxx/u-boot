@@ -39,6 +39,20 @@ rollback/image-identity policy, ATF compatibility, buffer ownership, active-slot
 selection and secure-loader orchestration are still required. A verified
 certificate alone does not authorize any SMC, TCM write or SCP reset.
 
+``tetris_scp_prepare_component()`` joins authentication and decryption for
+one component. Authentication and image address/capacity validation precede
+even service-page registration. It reuses a successful context for the second
+component, rejects a different page/transport, erases temporary metadata and
+poisons the context on failure. The caller must still establish the policy,
+ATF compatibility and exclusive memory ownership described above. No board
+caller or sensor startup is enabled by this operation.
+
+The combined C tests use synthetic signed images and a mock secure monitor.
+They cover successful plaintext verification, two-component context reuse,
+signature/pin and memory rejection without secure calls, registration errors,
+partial secure failure and wrong plaintext with output erasure and no retry.
+These tests are not evidence of hardware decryption or working sensors.
+
 Experimental C transport
 ------------------------
 

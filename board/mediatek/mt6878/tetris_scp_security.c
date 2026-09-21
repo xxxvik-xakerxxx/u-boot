@@ -12,6 +12,7 @@
 #include <linux/asn1_decoder.h>
 #include "tetris_scp_fields.asn1.h"
 #include "tetris_scp_security.h"
+#include "tetris_scp_crypto.h"
 
 #define MAX_CERT 16384U
 #define MAX_FIELDS 48U
@@ -268,6 +269,50 @@ int tetris_scp_authenticate(const void *cert1, size_t size1,
 failed:
 	memset(metadata, 0, sizeof(*metadata));
 	return -EACCES;
+}
+
+int tetris_scp_prepare_component(struct tetris_scp_crypto *crypto, void *page,
+		const struct tetris_scp_crypto_ops *crypto_ops,
+		const struct tetris_scp_security_ops *security_ops,
+		const struct tetris_scp_component_input *input,
+		const unsigned char root_pin[32])
+{
+	struct tetris_scp_security_metadata metadata;
+	volatile unsigned char *erase = (volatile unsigned char *)&metadata;
+	size_t i;
+	int ret;
+
+	if (!crypto || !input ||
+	    (crypto->state != TETRIS_SCP_CRYPTO_NEW &&
+	     crypto->state != TETRIS_SCP_CRYPTO_READY))
+		return -EINVAL;
+	ret = tetris_scp_authenticate(input->cert1, input->cert1_size,
+		input->cert2, input->cert2_size, input->image, input->size,
+		root_pin, security_ops, &metadata);
+	if (ret)
+		goto out;
+	ret = tetris_scp_crypto_check_image(crypto_ops, input->image,
+					  input->size, input->capacity);
+	if (ret)
+		goto out;
+	if (crypto->state == TETRIS_SCP_CRYPTO_NEW) {
+		ret = tetris_scp_crypto_init(crypto, page,
+				TETRIS_SCP_CRYPTO_PAGE_SIZE, crypto_ops);
+		if (ret)
+			goto out;
+	} else if (page != crypto->page || crypto_ops != crypto->ops) {
+		ret = -EINVAL;
+		goto out;
+	}
+	ret = tetris_scp_crypto_decrypt(crypto, input->image, input->size,
+		input->capacity, 1, metadata.wrapped, metadata.ciphertext,
+		metadata.plaintext);
+out:
+	for (i = 0; i < sizeof(metadata); i++)
+		erase[i] = 0;
+	if (ret)
+		crypto->state = TETRIS_SCP_CRYPTO_FAILED;
+	return ret;
 }
 
 #ifndef TETRIS_SCP_SECURITY_HOST_TEST
