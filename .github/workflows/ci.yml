@@ -59,6 +59,9 @@ jobs:
             common/board_f.o \
             board/mediatek/mt6878/mt6878_tetris.o
 
+      - name: Check firmware reservation precedes initrd relocation
+        run: python3 .github/tests/test_bootm_reservation_order.py
+
       - name: Configure
         run: |
           . .venv/bin/activate

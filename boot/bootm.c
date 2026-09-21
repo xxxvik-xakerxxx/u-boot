@@ -1024,6 +1024,13 @@ int bootm_run_states(struct bootm_info *bmi, int states)
 			ret = 0;
 	}
 
+#if CONFIG_IS_ENABLED(OF_LIBFDT) && CONFIG_IS_ENABLED(LMB)
+	/* The initrd allocator must see firmware carveouts before choosing RAM. */
+	if (!ret && images->ft_addr &&
+	    (states & (BOOTM_STATE_RAMDISK | BOOTM_STATE_FDT)))
+		boot_fdt_add_mem_rsv_regions(images->ft_addr);
+#endif
+
 	/* Relocate the ramdisk */
 #ifdef CONFIG_SYS_BOOT_RAMDISK_HIGH
 	if (!ret && (states & BOOTM_STATE_RAMDISK)) {
@@ -1040,7 +1047,6 @@ int bootm_run_states(struct bootm_info *bmi, int states)
 #endif
 #if CONFIG_IS_ENABLED(OF_LIBFDT) && CONFIG_IS_ENABLED(LMB)
 	if (!ret && (states & BOOTM_STATE_FDT)) {
-		boot_fdt_add_mem_rsv_regions(images->ft_addr);
 		ret = boot_relocate_fdt(&images->ft_addr, &images->ft_len);
 	}
 #endif
