@@ -83,3 +83,30 @@ branch prints the failing status and continues the diagnostic boot instead of
 resetting immediately. That fallback is for evidence collection only; radio,
 GNSS and modem support still require firmware-specific validation before being
 advertised as working.
+
+Early breadcrumb diagnostic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``codex/b40-early-breadcrumb`` diagnostic writes the last completed
+early-init stage into bits 31:16 of watchdog ``NONRST_REG2`` at
+``0x1c00a024``. Bits 15:0 are preserved. Read one 32-bit little-endian word
+from that address with the signed DA while the device is in BROM and report
+the full value. The upper halfword maps as follows:
+
+* ``a101``: entered the U-Boot reset vector;
+* ``a102``: completed position-independent relocation fixups;
+* ``a103``: returned from ``lowlevel_init``;
+* ``a104``: selected the primary CPU and is about to enter ``_main``;
+* ``a105``: entered ``_main`` before setting up the initial stack;
+* ``a106``: initialized the initial stack and global data;
+* ``a110``: entered ``arch_cpu_init``;
+* ``a111``: returned from ``icache_enable``;
+* ``a120``: entered ``dram_init``;
+* ``a121``: parsed the previous-bootloader memory description;
+* ``a122``: completed the bounded DRAM probe.
+* ``a130``: completed the pre-relocation init sequence;
+* ``a131``: relocated U-Boot successfully;
+* ``a132``: cleared BSS and is about to enter ``board_init_r``.
+
+This is an evidence-only image. Do not merge it as firmware compatibility
+support and do not flash both LK slots for the first test.

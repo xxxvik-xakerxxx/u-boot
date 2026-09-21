@@ -12,6 +12,16 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#define MT6878_WDT_NONRST_REG2	0x1c00a024UL
+
+static void mt6878_b40_breadcrumb(u16 stage)
+{
+	volatile u32 *reg = (volatile u32 *)MT6878_WDT_NONRST_REG2;
+
+	*reg = (*reg & 0xffff) | (u32)stage << 16;
+	asm volatile("dsb sy" ::: "memory");
+}
+
 int print_cpuinfo(void)
 {
 	return 0;
@@ -23,12 +33,15 @@ int dram_init(void)
 {
 	int ret;
 
+	mt6878_b40_breadcrumb(0xa120);
 	ret = fdtdec_setup_mem_size_base();
 	if (ret)
 		return ret;
+	mt6878_b40_breadcrumb(0xa121);
 
 	// Fix ram_size to 2GB, above that things start to break
 	gd->ram_size = get_ram_size((void *)gd->ram_base, SZ_2G);
+	mt6878_b40_breadcrumb(0xa122);
 
 	return 0;
 }

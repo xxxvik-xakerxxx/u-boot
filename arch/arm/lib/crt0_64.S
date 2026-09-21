@@ -66,6 +66,16 @@
 
 ENTRY(_main)
 
+#if CONFIG_IS_ENABLED(TARGET_MT6878)
+	ldr	x10, =0x1c00a024
+	ldr	w11, [x10]
+	and	w11, w11, #0xffff
+	movz	w12, #0xa105, lsl #16
+	orr	w11, w11, w12
+	str	w11, [x10]
+	dsb	sy
+#endif
+
 /*
  * Set up initial C runtime environment and call board_init_f(0).
  */
@@ -90,12 +100,32 @@ ENTRY(_main)
 	mov	x18, x0
 	bl	board_init_f_init_reserve
 
+#if CONFIG_IS_ENABLED(TARGET_MT6878)
+	ldr	x10, =0x1c00a024
+	ldr	w11, [x10]
+	and	w11, w11, #0xffff
+	movz	w12, #0xa106, lsl #16
+	orr	w11, w11, w12
+	str	w11, [x10]
+	dsb	sy
+#endif
+
 #if defined(CONFIG_DEBUG_UART) && CONFIG_IS_ENABLED(SERIAL)
 	bl	debug_uart_init
 #endif
 
 	mov	x0, #0
 	bl	board_init_f
+
+#if CONFIG_IS_ENABLED(TARGET_MT6878)
+	ldr	x10, =0x1c00a024
+	ldr	w11, [x10]
+	and	w11, w11, #0xffff
+	movz	w12, #0xa130, lsl #16
+	orr	w11, w11, w12
+	str	w11, [x10]
+	dsb	sy
+#endif
 
 #if !defined(CONFIG_XPL_BUILD)
 /*
@@ -133,6 +163,16 @@ ENTRY(_main)
 
 relocation_return:
 
+#if CONFIG_IS_ENABLED(TARGET_MT6878)
+	ldr	x10, =0x1c00a024
+	ldr	w11, [x10]
+	and	w11, w11, #0xffff
+	movz	w12, #0xa131, lsl #16
+	orr	w11, w11, w12
+	str	w11, [x10]
+	dsb	sy
+#endif
+
 /*
  * Set up final (full) environment
  */
@@ -168,6 +208,16 @@ clear_loop:
 	b.lo	clear_loop
 
 	/* call board_init_r(gd_t *id, ulong dest_addr) */
+
+#if CONFIG_IS_ENABLED(TARGET_MT6878)
+	ldr	x10, =0x1c00a024
+	ldr	w11, [x10]
+	and	w11, w11, #0xffff
+	movz	w12, #0xa132, lsl #16
+	orr	w11, w11, w12
+	str	w11, [x10]
+	dsb	sy
+#endif
 	mov	x0, x18				/* gd_t */
 	ldr	x1, [x18, #GD_RELOCADDR]	/* dest_addr */
 	b	board_init_r			/* PC relative jump */

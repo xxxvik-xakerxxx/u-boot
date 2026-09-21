@@ -11,12 +11,27 @@
 #include <linux/arm-smccc.h>
 #include <linux/types.h>
 
+#define MT6878_WDT_NONRST_REG2	0x1c00a024UL
+
+static void mt6878_b40_breadcrumb(u16 stage)
+{
+	volatile u32 *reg = (volatile u32 *)MT6878_WDT_NONRST_REG2;
+
+	if (!CONFIG_IS_ENABLED(TARGET_MT6878))
+		return;
+
+	*reg = (*reg & 0xffff) | (u32)stage << 16;
+	asm volatile("dsb sy" ::: "memory");
+}
+
 #define MTK_SIP_PLAT_BINFO ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_64, \
 					      ARM_SMCCC_OWNER_SIP, 0x529)
 
 int arch_cpu_init(void)
 {
+	mt6878_b40_breadcrumb(0xa110);
 	icache_enable();
+	mt6878_b40_breadcrumb(0xa111);
 
 	return 0;
 }

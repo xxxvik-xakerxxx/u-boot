@@ -53,6 +53,16 @@ _bss_end_ofs:
 	.quad	__bss_end - _start
 
 reset:
+	/* MT6878 B4.0 diagnostic; preserve reboot-mode bits in the low half. */
+#if CONFIG_IS_ENABLED(TARGET_MT6878)
+	ldr	x10, =0x1c00a024
+	ldr	w11, [x10]
+	and	w11, w11, #0xffff
+	movz	w12, #0xa101, lsl #16
+	orr	w11, w11, w12
+	str	w11, [x10]
+	dsb	sy
+#endif
 	/* Allow the board to save important registers */
 	b	save_boot_params
 .globl	save_boot_params_ret
@@ -102,6 +112,15 @@ pie_skip_reloc:
 	cmp	x2, x3
 	b.lo	pie_fix_loop
 pie_fixup_done:
+#if CONFIG_IS_ENABLED(TARGET_MT6878)
+	ldr	x10, =0x1c00a024
+	ldr	w11, [x10]
+	and	w11, w11, #0xffff
+	movz	w12, #0xa102, lsl #16
+	orr	w11, w11, w12
+	str	w11, [x10]
+	dsb	sy
+#endif
 #endif
 
 #if defined(CONFIG_ARMV8_SPL_EXCEPTION_VECTORS) || !defined(CONFIG_XPL_BUILD)
@@ -174,6 +193,16 @@ pie_fixup_done:
 	/* Processor specific initialization */
 	bl	lowlevel_init
 
+#if CONFIG_IS_ENABLED(TARGET_MT6878)
+	ldr	x10, =0x1c00a024
+	ldr	w11, [x10]
+	and	w11, w11, #0xffff
+	movz	w12, #0xa103, lsl #16
+	orr	w11, w11, w12
+	str	w11, [x10]
+	dsb	sy
+#endif
+
 #if defined(CONFIG_ARMV8_SPIN_TABLE) && !defined(CONFIG_XPL_BUILD)
 	branch_if_master x0, master_cpu
 	b	spin_table_secondary_jump
@@ -204,6 +233,15 @@ slave_cpu:
 	br	x0			/* branch to the given address */
 #endif /* CONFIG_ARMV8_MULTIENTRY */
 master_cpu:
+#if CONFIG_IS_ENABLED(TARGET_MT6878)
+	ldr	x10, =0x1c00a024
+	ldr	w11, [x10]
+	and	w11, w11, #0xffff
+	movz	w12, #0xa104, lsl #16
+	orr	w11, w11, w12
+	str	w11, [x10]
+	dsb	sy
+#endif
 	msr	SPSel, #1		/* make sure we use SP_ELx */
 	bl	_main
 
