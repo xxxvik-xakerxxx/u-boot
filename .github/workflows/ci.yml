@@ -50,6 +50,9 @@ jobs:
       - name: Test SCP certificate and ciphertext verification
         run: .venv/bin/python .github/tests/test_tetris_scp_security.py
 
+      - name: Test SCP secure transport without hardware
+        run: sh .github/tests/run_tetris_scp_crypto.sh
+
       - name: Compile initramfs-only previous-bootloader handoff
         run: |
           make O=build-initramfs-only mt6878_tetris_defconfig
@@ -57,12 +60,15 @@ jobs:
             --disable SAVE_PREV_BL_FDT_ADDR \
             --enable SAVE_PREV_BL_INITRAMFS_START_ADDR \
             --enable TETRIS_SCP_HANDOFF_INVENTORY
+          scripts/config --file build-initramfs-only/.config \
+            --enable TETRIS_SCP_CRYPTO
           make O=build-initramfs-only olddefconfig
           make O=build-initramfs-only -j"$(nproc)" \
             CROSS_COMPILE=aarch64-linux-gnu- \
             arch/arm/lib/save_prev_bl_data.o \
             common/board_f.o \
             board/mediatek/mt6878/tetris_scp_handoff.o \
+            board/mediatek/mt6878/tetris_scp_crypto.o \
             board/mediatek/mt6878/mt6878_tetris.o
 
       - name: Configure

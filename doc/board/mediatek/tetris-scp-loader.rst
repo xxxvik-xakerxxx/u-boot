@@ -1,9 +1,39 @@
 Tetris SCP Loader: Verified Inputs and Missing Runtime
 ====================================================
 
-Status: SCP startup and sensors are not implemented by this change. The
-offline verifier proves certificate/payload consistency, not hardware support.
-No secure calls, firmware execution or device writes are added.
+Status: SCP startup and sensors remain unimplemented. The offline verifier
+proves certificate/payload consistency, not hardware support. Experimental
+decryption transport exists but is not enabled or called by the board.
+
+Experimental C transport
+------------------------
+
+``board/mediatek/mt6878/tetris_scp_crypto.c`` implements the secure decryption
+stage behind default-off ``CONFIG_TETRIS_SCP_CRYPTO``. Real SMC and cache
+adapters exist, but there is no board invocation, command or automatic startup path.
+The normal image still performs observations only.
+
+The caller must verify the ATF ABI, certificate chain and policy, select the
+correct active-slot component, and exclusively own/reserve the 4 KiB service
+page and image buffer before calling this transport. Merely enabling the
+configuration does not establish these conditions. The fixed page address is
+an ATF ABI restriction, not permission to overwrite that address.
+
+Initialization invokes ``0xc200010b`` with the audited page address and size.
+Decryption verifies the ciphertext SHA256 before any descriptor writes, checks
+16-byte cipher alignment, cache-line capacity, physical limits and page/image
+non-overlap, constructs the little-endian descriptor, flushes data, and invokes
+``0xc2000133`` with selector 1. It invalidates the image after every secure
+return, verifies the expected plaintext SHA256, and erases failed output and
+temporary material. A secure error or output-hash mismatch poisons the context;
+no automatic retry or irreversible engine-disable call is made. A successful
+context can process both components without registering the page twice.
+
+``.github/tests/run_tetris_scp_crypto.sh`` runs the C transport under address
+and undefined-behavior sanitizers with a mock secure monitor. These tests check
+descriptor layout, sequencing, bounds, failure cleanup and context lifetime,
+not hardware decryption. CI additionally cross-compiles the real adapter with
+the experimental option enabled. Runtime behavior remains untested.
 
 Offline verification
 --------------------

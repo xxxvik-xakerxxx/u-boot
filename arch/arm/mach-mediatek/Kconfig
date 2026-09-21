@@ -172,6 +172,17 @@ config TARGET_MT8518
 
 endchoice
 
+config TETRIS_SCP_CRYPTO
+	bool "Build experimental Tetris SCP secure decryption transport"
+	depends on TARGET_MT6878
+	select SHA256
+	help
+	  Compile the audited ATF service-page transport with ciphertext and
+	  plaintext integrity checks. No command or automatic boot invocation
+	  is installed. A caller must first authenticate metadata, establish ATF
+	  compatibility, and exclusively reserve the service page and buffers.
+	  This option alone does not load or start SCP.
+
 config TETRIS_SCP_HANDOFF_INVENTORY
 	bool "Build Nothing Tetris SCP handoff inventory helper"
 	depends on TARGET_MT6878
