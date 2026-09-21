@@ -11,6 +11,10 @@
 #define TEST_PARTITION_SIZE	0x1000000ULL
 #define TEST_IMAGE_SIZE		0x400000ULL
 
+static const u32 container_sizes[TETRIS_SCP_CONTAINER_SECTIONS] = {
+	0x11c730, 0x6c5, 0x423, 0x924740, 0x6c5, 0x423,
+};
+
 struct fixture {
 	u8 fdt[TEST_FDT_SIZE];
 	struct tetris_scp_range dram[2];
@@ -340,6 +344,83 @@ static void test_region_info_decoder(void)
 		"null snapshot rejected");
 }
 
+static void init_container_headers(
+	u8 headers[TETRIS_SCP_CONTAINER_SECTIONS]
+		  [TETRIS_SCP_CONTAINER_HEADER_SIZE])
+{
+	size_t i;
+
+	memset(headers, 0xff, TETRIS_SCP_CONTAINER_SECTIONS *
+	       TETRIS_SCP_CONTAINER_HEADER_SIZE);
+	for (i = 0; i < TETRIS_SCP_CONTAINER_SECTIONS; i++) {
+		u8 *header = headers[i];
+
+		memcpy(header, (u32[]){ TETRIS_SCP_CONTAINER_MAGIC }, 4);
+		memcpy(header + 4, &container_sizes[i], 4);
+		memset(header + 8, 0, 32);
+		strcpy((char *)header + 8, tetris_scp_container_names[i]);
+		memcpy(header + 48,
+		       (u32[]){ TETRIS_SCP_CONTAINER_EXT_MAGIC }, 4);
+		memcpy(header + 52,
+		       (u32[]){ TETRIS_SCP_CONTAINER_HEADER_SIZE }, 4);
+	}
+}
+
+static void test_scp_container_parser(void)
+{
+	u8 headers[TETRIS_SCP_CONTAINER_SECTIONS]
+		  [TETRIS_SCP_CONTAINER_HEADER_SIZE];
+	struct tetris_scp_container container;
+	u32 value;
+
+	init_container_headers(headers);
+	require(!tetris_scp_parse_container_headers(headers, 0x1000000,
+						    &container),
+		"valid SCP container accepted");
+	require(container.valid &&
+		container.failure == TETRIS_SCP_CONTAINER_OK,
+		"valid SCP container classified");
+	require(container.image_size == 0xa43070,
+		"observed SCP container size retained");
+	require(container.sections[3].offset == 0x11d830,
+		"DRAM section offset retained");
+
+	init_container_headers(headers);
+	headers[0][0] = 0;
+	require(tetris_scp_parse_container_headers(headers, 0x1000000,
+						   &container) == -EINVAL &&
+		container.failure == TETRIS_SCP_CONTAINER_BAD_MAGIC,
+		"bad container magic rejected");
+
+	init_container_headers(headers);
+	strcpy((char *)headers[3] + 8, "tinysys-scp-wrong");
+	require(tetris_scp_parse_container_headers(headers, 0x1000000,
+						   &container) == -EINVAL &&
+		container.failure == TETRIS_SCP_CONTAINER_BAD_NAME,
+		"wrong section order rejected");
+
+	init_container_headers(headers);
+	value = 0x100;
+	memcpy(headers[2] + 52, &value, sizeof(value));
+	require(tetris_scp_parse_container_headers(headers, 0x1000000,
+						   &container) == -EINVAL &&
+		container.failure == TETRIS_SCP_CONTAINER_BAD_HEADER_SIZE,
+		"short section header rejected");
+
+	init_container_headers(headers);
+	require(tetris_scp_parse_container_headers(headers, 0xa00000,
+						   &container) == -EINVAL &&
+		container.failure == TETRIS_SCP_CONTAINER_BAD_SIZE,
+		"partition overrun rejected");
+	require(tetris_scp_parse_container_headers(NULL, 0x1000000,
+						   &container) == -EINVAL &&
+		container.failure == TETRIS_SCP_CONTAINER_BAD_ARGUMENT,
+		"null section headers rejected");
+	require(tetris_scp_parse_container_headers(headers, 0x1000000,
+						   NULL) == -EINVAL,
+		"null container result rejected");
+}
+
 int main(void)
 {
 	test_valid_slots_and_read_only_fdt();
@@ -348,6 +429,7 @@ int main(void)
 	test_carveout_evidence();
 	test_bad_arguments_and_disabled_call();
 	test_region_info_decoder();
+	test_scp_container_parser();
 	puts("tetris SCP handoff inventory tests: PASS");
 	return 0;
 }

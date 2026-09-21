@@ -17,6 +17,24 @@
 #define TETRIS_SCP_FW_COMPAT	"mediatek,SCP-reserved"
 #define TETRIS_SCP_SHARE_MIN	0x11a9b00ULL
 #define TETRIS_SCP_SHARE_LIMIT	0x90000000ULL
+#define TETRIS_SCP_CONTAINER_MAGIC	0x58881688U
+#define TETRIS_SCP_CONTAINER_EXT_MAGIC	0x58891689U
+
+static const char *const tetris_scp_container_names[] = {
+	"tinysys-scp-RV55_A", "cert1", "cert2",
+	"tinysys-scp-RV55_A_dram", "cert1", "cert2",
+};
+
+static const char *const tetris_scp_container_failure_names[] = {
+	[TETRIS_SCP_CONTAINER_OK] = "ok",
+	[TETRIS_SCP_CONTAINER_BAD_ARGUMENT] = "bad-argument",
+	[TETRIS_SCP_CONTAINER_BAD_MAGIC] = "bad-magic",
+	[TETRIS_SCP_CONTAINER_BAD_EXT_MAGIC] = "bad-ext-magic",
+	[TETRIS_SCP_CONTAINER_BAD_HEADER_SIZE] = "bad-header-size",
+	[TETRIS_SCP_CONTAINER_BAD_NAME] = "bad-name",
+	[TETRIS_SCP_CONTAINER_BAD_SIZE] = "bad-size",
+	[TETRIS_SCP_CONTAINER_RANGE_OVERFLOW] = "range-overflow",
+};
 
 static const char *const tetris_scp_region_failure_names[] = {
 	[TETRIS_SCP_REGION_OK] = "ok",
@@ -77,6 +95,96 @@ const char *tetris_scp_region_failure_name(
 		return "unknown";
 
 	return tetris_scp_region_failure_names[failure];
+}
+
+const char *tetris_scp_container_failure_name(
+	enum tetris_scp_container_failure failure)
+{
+	if (failure < 0 ||
+	    failure >= (int)(sizeof(tetris_scp_container_failure_names) /
+			     sizeof(tetris_scp_container_failure_names[0])) ||
+	    !tetris_scp_container_failure_names[failure])
+		return "unknown";
+
+	return tetris_scp_container_failure_names[failure];
+}
+
+static int tetris_scp_container_fail(
+	struct tetris_scp_container *container,
+	enum tetris_scp_container_failure failure)
+{
+	container->failure = failure;
+	return -EINVAL;
+}
+
+static u32 tetris_scp_get_le32(const u8 *bytes)
+{
+	return (u32)bytes[0] | (u32)bytes[1] << 8 |
+	       (u32)bytes[2] << 16 | (u32)bytes[3] << 24;
+}
+
+int tetris_scp_parse_container_headers(
+	const u8 headers[TETRIS_SCP_CONTAINER_SECTIONS]
+			[TETRIS_SCP_CONTAINER_HEADER_SIZE],
+	u64 partition_size, struct tetris_scp_container *container)
+{
+	u64 offset = 0;
+	size_t i;
+
+	if (!container)
+		return -EINVAL;
+	memset(container, 0, sizeof(*container));
+	container->failure = TETRIS_SCP_CONTAINER_BAD_ARGUMENT;
+	if (!headers || !partition_size)
+		return -EINVAL;
+
+	for (i = 0; i < TETRIS_SCP_CONTAINER_SECTIONS; i++) {
+		const u8 *header = headers[i];
+		u32 payload_size = tetris_scp_get_le32(header + 4);
+		u32 header_size = tetris_scp_get_le32(header + 52);
+		u64 next;
+
+		if (tetris_scp_get_le32(header) != TETRIS_SCP_CONTAINER_MAGIC)
+			return tetris_scp_container_fail(container,
+					TETRIS_SCP_CONTAINER_BAD_MAGIC);
+		if (tetris_scp_get_le32(header + 48) !=
+		    TETRIS_SCP_CONTAINER_EXT_MAGIC)
+			return tetris_scp_container_fail(container,
+					TETRIS_SCP_CONTAINER_BAD_EXT_MAGIC);
+		if (header_size != TETRIS_SCP_CONTAINER_HEADER_SIZE)
+			return tetris_scp_container_fail(container,
+					TETRIS_SCP_CONTAINER_BAD_HEADER_SIZE);
+		if (strnlen((const char *)header + 8, 32) == 32 ||
+		    strcmp((const char *)header + 8,
+			   tetris_scp_container_names[i]))
+			return tetris_scp_container_fail(container,
+					TETRIS_SCP_CONTAINER_BAD_NAME);
+		if (!payload_size)
+			return tetris_scp_container_fail(container,
+					TETRIS_SCP_CONTAINER_BAD_SIZE);
+		if (offset > ~(u64)0 - header_size ||
+		    offset + header_size > ~(u64)0 - payload_size)
+			return tetris_scp_container_fail(container,
+					TETRIS_SCP_CONTAINER_RANGE_OVERFLOW);
+		next = offset + header_size + payload_size;
+		if (next > ~(u64)0 - (TETRIS_SCP_CONTAINER_ALIGNMENT - 1))
+			return tetris_scp_container_fail(container,
+					TETRIS_SCP_CONTAINER_RANGE_OVERFLOW);
+		next = (next + TETRIS_SCP_CONTAINER_ALIGNMENT - 1) &
+		       ~(u64)(TETRIS_SCP_CONTAINER_ALIGNMENT - 1);
+		if (next > partition_size)
+			return tetris_scp_container_fail(container,
+					TETRIS_SCP_CONTAINER_BAD_SIZE);
+
+		container->sections[i].offset = offset;
+		container->sections[i].payload_size = payload_size;
+		offset = next;
+	}
+
+	container->image_size = offset;
+	container->failure = TETRIS_SCP_CONTAINER_OK;
+	container->valid = true;
+	return 0;
 }
 
 static bool tetris_scp_u32_range_valid(u32 start, u32 size)

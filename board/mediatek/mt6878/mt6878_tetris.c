@@ -38,7 +38,9 @@ static u64 tetris_test_get_le64(const void *ptr)
 #else
 #include <config.h>
 #include <bootm.h>
+#include <blk.h>
 #include <command.h>
+#include <dm/uclass-id.h>
 #include <env.h>
 #include <fastboot.h>
 #include <fdtdec.h>
@@ -50,6 +52,8 @@ static u64 tetris_test_get_le64(const void *ptr)
 #include <asm/unaligned.h>
 #include <linux/arm-smccc.h>
 #include <linux/libfdt.h>
+#include <malloc.h>
+#include <part.h>
 #include <string.h>
 
 #include "tetris_scp_handoff.h"
@@ -1477,6 +1481,116 @@ static int tetris_observe_scp_region_info(void *fdt)
 	return ret;
 }
 
+static int tetris_scp_read_partition_bytes(struct blk_desc *desc,
+					   const struct disk_partition *part,
+					   u64 offset, void *buffer,
+					   size_t size)
+{
+	u64 partition_size = (u64)part->size * part->blksz;
+	lbaint_t blocks, start;
+	size_t within;
+	void *scratch;
+
+	if (!size || offset > partition_size || size > partition_size - offset)
+		return -EINVAL;
+	within = offset % part->blksz;
+	blocks = DIV_ROUND_UP(within + size, part->blksz);
+	start = part->start + offset / part->blksz;
+	scratch = memalign(ARCH_DMA_MINALIGN, blocks * part->blksz);
+	if (!scratch)
+		return -ENOMEM;
+	if (blk_dread(desc, start, blocks, scratch) != blocks) {
+		free(scratch);
+		return -EIO;
+	}
+	memcpy(buffer, (u8 *)scratch + within, size);
+	free(scratch);
+	return 0;
+}
+
+static int tetris_observe_scp_container(void *fdt, struct blk_desc *desc,
+					const char *partition_name)
+{
+	u8 headers[TETRIS_SCP_CONTAINER_SECTIONS]
+		  [TETRIS_SCP_CONTAINER_HEADER_SIZE];
+	struct tetris_scp_container container;
+	struct disk_partition part;
+	char property[48];
+	const char *status;
+	u64 offset = 0, partition_size;
+	size_t i;
+	int chosen, ret;
+
+	ret = part_get_info_by_name(desc, partition_name, &part);
+	if (ret < 0)
+		return ret;
+	memset(headers, 0, sizeof(headers));
+	partition_size = (u64)part.size * part.blksz;
+	for (i = 0; i < TETRIS_SCP_CONTAINER_SECTIONS; i++) {
+		u32 payload_size;
+
+		ret = tetris_scp_read_partition_bytes(desc, &part, offset,
+					headers[i], sizeof(headers[i]));
+		if (ret)
+			return ret;
+		payload_size = get_unaligned_le32(headers[i] + 4);
+		if (!payload_size ||
+		    offset > partition_size - TETRIS_SCP_CONTAINER_HEADER_SIZE ||
+		    payload_size > partition_size - offset -
+				   TETRIS_SCP_CONTAINER_HEADER_SIZE)
+			break;
+		offset += TETRIS_SCP_CONTAINER_HEADER_SIZE + payload_size;
+		offset = ALIGN(offset, TETRIS_SCP_CONTAINER_ALIGNMENT);
+	}
+
+	ret = tetris_scp_parse_container_headers(headers, partition_size,
+						 &container);
+	status = tetris_scp_container_failure_name(container.failure);
+	chosen = fdt_path_offset(fdt, "/chosen");
+	if (chosen >= 0) {
+		snprintf(property, sizeof(property),
+			 "nothing,%s-container-status", partition_name);
+		if (fdt_setprop_string(fdt, chosen, property, status))
+			printf("Tetris: %s status publication failed\n",
+			       partition_name);
+		if (container.valid) {
+			snprintf(property, sizeof(property),
+				 "nothing,%s-container-size", partition_name);
+			if (fdt_setprop_u64(fdt, chosen, property,
+					    container.image_size))
+				printf("Tetris: %s size publication failed\n",
+				       partition_name);
+		}
+	}
+
+	printf("Tetris: %s SCP container status=%s size=%llu\n",
+	       partition_name, status, container.image_size);
+	return ret;
+}
+
+static void tetris_observe_scp_containers(void *fdt)
+{
+	struct udevice *dev;
+	struct blk_desc *desc;
+	int ret;
+
+	ret = blk_get_device(UCLASS_SCSI, 2, &dev);
+	if (ret) {
+		printf("Tetris: SCP container storage unavailable: %d\n", ret);
+		return;
+	}
+	desc = blk_get_by_device(dev);
+	if (!desc)
+		return;
+
+	ret = tetris_observe_scp_container(fdt, desc, "scp_a");
+	if (ret)
+		printf("Tetris: scp_a container unavailable: %d\n", ret);
+	ret = tetris_observe_scp_container(fdt, desc, "scp_b");
+	if (ret)
+		printf("Tetris: scp_b container unavailable: %d\n", ret);
+}
+
 void board_prep_linux(struct bootm_headers *images)
 {
 	int ret;
@@ -1493,6 +1607,7 @@ void board_prep_linux(struct bootm_headers *images)
 		ret = tetris_observe_scp_region_info(fdt);
 		if (ret)
 			printf("Tetris: SCP region-info unavailable: %d\n", ret);
+		tetris_observe_scp_containers(fdt);
 	}
 
 	ret = tetris_handoff_devinfo(fdt);

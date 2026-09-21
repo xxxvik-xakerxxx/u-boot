@@ -68,3 +68,13 @@ recovery ranges with bounded arithmetic. It publishes only
 ``/chosen``. It does not copy firmware, expose physical addresses, or start,
 stop, wake, reset, clock or power SCP. A zero or malformed handoff remains a
 normal fail-closed diagnostic result and does not block Linux boot.
+
+U-Boot also reads only the six 512-byte section headers from both 16 MiB SCP
+partitions. The parser requires the observed Tetris order
+``tinysys-scp-RV55_A``, ``cert1``, ``cert2``,
+``tinysys-scp-RV55_A_dram``, ``cert1``, ``cert2`` and validates both MediaTek
+magic values, header sizes, payload sizes, alignment and partition bounds. It
+publishes ``nothing,scp-a-container-status`` and
+``nothing,scp-b-container-status`` plus the bounded container sizes under
+``/chosen``. This is identity and layout observation only: certificates are
+not authenticated and no payload is copied, decrypted or executed.

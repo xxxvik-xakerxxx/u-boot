@@ -18,6 +18,33 @@ typedef __UINT64_TYPE__ u64;
 #define TETRIS_SCP_IDENTITY_SIZE	32U
 #define TETRIS_SCP_REGION_INFO_WORDS	14U
 #define TETRIS_SCP_REGION_INFO_SIZE	(TETRIS_SCP_REGION_INFO_WORDS * 4U)
+#define TETRIS_SCP_CONTAINER_SECTIONS	6U
+#define TETRIS_SCP_CONTAINER_HEADER_SIZE	512U
+#define TETRIS_SCP_CONTAINER_ALIGNMENT	16U
+
+enum tetris_scp_container_failure {
+	TETRIS_SCP_CONTAINER_OK,
+	TETRIS_SCP_CONTAINER_BAD_ARGUMENT,
+	TETRIS_SCP_CONTAINER_BAD_MAGIC,
+	TETRIS_SCP_CONTAINER_BAD_EXT_MAGIC,
+	TETRIS_SCP_CONTAINER_BAD_HEADER_SIZE,
+	TETRIS_SCP_CONTAINER_BAD_NAME,
+	TETRIS_SCP_CONTAINER_BAD_SIZE,
+	TETRIS_SCP_CONTAINER_RANGE_OVERFLOW,
+};
+
+struct tetris_scp_container_section {
+	u64 offset;
+	u32 payload_size;
+};
+
+struct tetris_scp_container {
+	bool valid;
+	enum tetris_scp_container_failure failure;
+	u64 image_size;
+	struct tetris_scp_container_section
+		sections[TETRIS_SCP_CONTAINER_SECTIONS];
+};
 
 enum tetris_scp_slot {
 	TETRIS_SCP_SLOT_UNKNOWN,
@@ -131,6 +158,12 @@ int tetris_scp_decode_region_info(
 	struct tetris_scp_region_snapshot *snapshot);
 const char *tetris_scp_region_failure_name(
 	enum tetris_scp_region_failure failure);
+int tetris_scp_parse_container_headers(
+	const u8 headers[TETRIS_SCP_CONTAINER_SECTIONS]
+			[TETRIS_SCP_CONTAINER_HEADER_SIZE],
+	u64 partition_size, struct tetris_scp_container *container);
+const char *tetris_scp_container_failure_name(
+	enum tetris_scp_container_failure failure);
 
 /* Explicitly fail closed until the LK/SCP handoff ABI is proven. */
 #ifdef TETRIS_SCP_HANDOFF_HOST_TEST

@@ -228,6 +228,12 @@ jobs:
               "unmap_sysmem(mapped)",
               '"nothing,scp-region-info-status"',
               '"nothing,scp-region-info-size"',
+              'part_get_info_by_name(desc, partition_name, &part)',
+              'blk_dread(desc, start, blocks, scratch)',
+              'tetris_scp_parse_container_headers(headers, partition_size,',
+              '"nothing,%s-container-status"',
+              '"nothing,%s-container-size"',
+              'tetris_observe_scp_containers(fdt)',
           ):
               if required not in scp_runtime:
                   raise SystemExit(f"missing bounded SCP observation: {required}")
@@ -241,6 +247,8 @@ jobs:
               "reset_",
               "request_irq(",
               "dma_",
+              "blk_dwrite(",
+              "blk_write(",
           ):
               if forbidden in scp_runtime:
                   raise SystemExit(
