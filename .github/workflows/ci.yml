@@ -35,6 +35,7 @@ jobs:
             python3-venv \
             swig \
             uuid-dev
+          sudo apt-get install -y zlib1g-dev
 
       - name: Install Python dependencies
         run: |
@@ -52,6 +53,9 @@ jobs:
 
       - name: Test SCP secure transport without hardware
         run: sh .github/tests/run_tetris_scp_crypto.sh
+
+      - name: Check firmware reservation precedes initrd relocation
+        run: python3 .github/tests/test_bootm_reservation_order.py
 
       - name: Compile initramfs-only previous-bootloader handoff
         run: |

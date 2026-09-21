@@ -421,6 +421,65 @@ static void test_scp_container_parser(void)
 		"null container result rejected");
 }
 
+static void boot_control_crc(u8 record[32])
+{
+	u32 crc = crc32(0, record, 28);
+	unsigned int i;
+
+	for (i = 0; i < 4; i++)
+		record[28 + i] = crc >> (8 * i);
+}
+
+static void test_boot_control(void)
+{
+	u8 record[32] = { '_', 'a', 0, 0, 'B', 'C', 'A', 'B', 1, 2 };
+	u8 saved[32];
+	enum tetris_scp_slot slot;
+	unsigned int i;
+
+	record[12] = 0xff;
+	boot_control_crc(record);
+	memcpy(saved, record, sizeof(record));
+	require(!tetris_scp_decode_boot_control(record, sizeof(record), &slot) &&
+		slot == TETRIS_SCP_SLOT_A, "valid recorded slot A");
+	require(!memcmp(record, saved, sizeof(record)), "boot control read-only");
+	for (i = 0; i < sizeof(record); i++) {
+		record[i] ^= 1;
+		require(tetris_scp_decode_boot_control(record, sizeof(record), &slot) ==
+			-EBADMSG && slot == TETRIS_SCP_SLOT_UNKNOWN,
+			"corrupt metadata cannot select a slot");
+		record[i] ^= 1;
+	}
+	record[1] = 'b';
+	record[12] = 0;
+	record[14] = 0x8f; /* Successful, zero tries: still bootable. */
+	boot_control_crc(record);
+	require(!tetris_scp_decode_boot_control(record, sizeof(record), &slot) &&
+		slot == TETRIS_SCP_SLOT_B, "successful B with no retries");
+	record[15] = 1;
+	boot_control_crc(record);
+	require(tetris_scp_decode_boot_control(record, sizeof(record), &slot) ==
+		-ENODATA, "corrupt recorded slot rejected without fallback");
+	record[15] = 0;
+	record[14] = 0x0f;
+	boot_control_crc(record);
+	require(tetris_scp_decode_boot_control(record, sizeof(record), &slot) ==
+		-ENODATA, "exhausted unsuccessful slot rejected");
+	record[14] = 0x8e;
+	record[12] = 0xff;
+	boot_control_crc(record);
+	require(tetris_scp_decode_boot_control(record, sizeof(record), &slot) ==
+		-ESTALE, "stale suffix rejected without selecting higher priority");
+	record[8] = 2;
+	boot_control_crc(record);
+	require(tetris_scp_decode_boot_control(record, sizeof(record), &slot) ==
+		-EPROTONOSUPPORT, "unknown boot control version rejected");
+	require(tetris_scp_decode_boot_control(NULL, 32, &slot) == -EINVAL &&
+		slot == TETRIS_SCP_SLOT_UNKNOWN, "missing metadata clears slot");
+	require(tetris_scp_decode_boot_control(record, 31, &slot) == -EINVAL,
+		"short metadata rejected");
+}
+
 int main(void)
 {
 	test_valid_slots_and_read_only_fdt();
@@ -430,6 +489,7 @@ int main(void)
 	test_bad_arguments_and_disabled_call();
 	test_region_info_decoder();
 	test_scp_container_parser();
+	test_boot_control();
 	puts("tetris SCP handoff inventory tests: PASS");
 	return 0;
 }

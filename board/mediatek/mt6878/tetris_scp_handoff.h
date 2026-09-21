@@ -21,6 +21,8 @@ typedef __UINT64_TYPE__ u64;
 #define TETRIS_SCP_CONTAINER_SECTIONS	6U
 #define TETRIS_SCP_CONTAINER_HEADER_SIZE	512U
 #define TETRIS_SCP_CONTAINER_ALIGNMENT	16U
+#define TETRIS_SCP_BOOT_CONTROL_SIZE 32U
+#define TETRIS_SCP_BOOT_CONTROL_OFFSET 2048U
 
 enum tetris_scp_container_failure {
 	TETRIS_SCP_CONTAINER_OK,
@@ -56,6 +58,10 @@ enum tetris_scp_slot_source {
 	TETRIS_SCP_SLOT_SOURCE_UNKNOWN,
 	TETRIS_SCP_SLOT_SOURCE_BOOT_CONTROL,
 };
+
+/* Recorded suffix, not proof of which LK image executed on this boot. */
+int tetris_scp_decode_boot_control(const u8 *data, size_t size,
+				   enum tetris_scp_slot *slot);
 
 enum tetris_scp_failure {
 	TETRIS_SCP_OK,

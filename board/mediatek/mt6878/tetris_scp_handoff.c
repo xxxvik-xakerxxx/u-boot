@@ -5,10 +5,12 @@
 #include <limits.h>
 #include <string.h>
 #include <libfdt.h>
+#include <zlib.h>
 #else
 #include <linux/errno.h>
 #include <linux/libfdt.h>
 #include <linux/string.h>
+#include <u-boot/crc.h>
 #endif
 
 #include "tetris_scp_handoff.h"
@@ -19,6 +21,42 @@
 #define TETRIS_SCP_SHARE_LIMIT	0x90000000ULL
 #define TETRIS_SCP_CONTAINER_MAGIC	0x58881688U
 #define TETRIS_SCP_CONTAINER_EXT_MAGIC	0x58891689U
+
+int tetris_scp_decode_boot_control(const u8 *data, size_t size,
+				   enum tetris_scp_slot *slot)
+{
+	u32 stored_crc;
+	u8 metadata, other;
+	unsigned int index;
+
+	if (!slot)
+		return -EINVAL;
+	*slot = TETRIS_SCP_SLOT_UNKNOWN;
+	if (!data || size != TETRIS_SCP_BOOT_CONTROL_SIZE)
+		return -EINVAL;
+	stored_crc = (u32)data[28] | (u32)data[29] << 8 |
+		     (u32)data[30] << 16 | (u32)data[31] << 24;
+	if ((u32)crc32(0, data, 28) != stored_crc)
+		return -EBADMSG;
+	if (memcmp(data + 4, "BCAB", 4) || data[8] != 1 ||
+	    (data[9] & 7) != 2)
+		return -EPROTONOSUPPORT;
+	if (data[0] != '_' || (data[1] != 'a' && data[1] != 'b') ||
+	    data[2] || data[3])
+		return -ENODATA;
+	index = data[1] - 'a';
+	metadata = data[12 + index * 2];
+	other = data[12 + (1 - index) * 2];
+	if (!(metadata & 15) || !(metadata & 0xf0) ||
+	    (data[13 + index * 2] & 1))
+		return -ENODATA;
+	/* Do not choose the other slot when the stored suffix is stale. */
+	if (!(data[13 + (1 - index) * 2] & 1) && (other & 0xf0) &&
+	    (other & 15) > (metadata & 15))
+		return -ESTALE;
+	*slot = index ? TETRIS_SCP_SLOT_B : TETRIS_SCP_SLOT_A;
+	return 0;
+}
 
 static const char *const tetris_scp_container_names[] = {
 	"tinysys-scp-RV55_A", "cert1", "cert2",

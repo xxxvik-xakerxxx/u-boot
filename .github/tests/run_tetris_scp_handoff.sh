@@ -20,5 +20,5 @@ cd "$root"
 	scripts/dtc/libfdt/fdt_strerror.c \
 	scripts/dtc/libfdt/fdt_sw.c \
 	scripts/dtc/libfdt/fdt_wip.c \
-	-o "$binary"
+	-o "$binary" -lz
 "$binary"

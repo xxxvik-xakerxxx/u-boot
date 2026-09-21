@@ -38,6 +38,31 @@ the experimental option enabled. Runtime behavior remains untested.
 Offline verification
 --------------------
 
+Slot metadata
+~~~~~~~~~~~~~
+
+The board now reads the 32-byte Android boot-control record at ``misc+2048``
+through the GPT/block API. The decoder requires CRC32, magic, version 1, two
+slots, a terminated ``_a``/``_b`` suffix and a bootable recorded slot. A
+higher-priority bootable opposite slot rejects stale metadata without silently
+switching firmware. It never repairs metadata, decrements retries or calls
+``ab_select_slot()`` (which can write even with retry decrement disabled).
+
+The read-only observation publishes ``nothing,scp-recorded-partition`` and
+``nothing,scp-boot-control-error`` in ``/chosen``. The partition property is
+removed before any error is published. This recorded suffix is not proof of
+the LK slot used on the current boot and does not authorize decryption/startup.
+In particular, this tree's fastboot ``current-slot`` handler is hard-coded to
+``a`` and must not be used as slot evidence. Fixing its general A/B semantics
+is outside this reader; it is not changed to report a potentially stale suffix.
+
+On boot ``f628eee9-5439-4913-bdcd-adf50c958b38``, the read-only live record had
+valid CRC32 ``d2190560``, suffix ``_a``, bootable A and disabled B. This confirms
+the stored metadata for that boot only, not compatibility across all devices.
+
+Certificate verification
+~~~~~~~~~~~~~~~~~~~~~~~~
+
 Install ``tools/tetris-scp-security-requirements.txt`` in a virtual environment,
 then run ``python tools/tetris_scp_security.py /path/to/scp_a.img``. The tool
 checks six bounded MediaTek sections, canonical DER, RSA-PSS/SHA256 signatures,

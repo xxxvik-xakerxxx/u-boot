@@ -1569,6 +1569,40 @@ static int tetris_observe_scp_container(void *fdt, struct blk_desc *desc,
 	return ret;
 }
 
+static int tetris_observe_scp_boot_control(void *fdt, struct blk_desc *desc)
+{
+	u8 record[TETRIS_SCP_BOOT_CONTROL_SIZE];
+	struct disk_partition part;
+	enum tetris_scp_slot slot;
+	int chosen, ret, publish_ret;
+	const char *partition;
+
+	ret = part_get_info_by_name(desc, "misc", &part);
+	if (ret >= 0)
+		ret = tetris_scp_read_partition_bytes(desc, &part,
+				TETRIS_SCP_BOOT_CONTROL_OFFSET, record, sizeof(record));
+	if (!ret)
+		ret = tetris_scp_decode_boot_control(record, sizeof(record), &slot);
+	chosen = fdt_path_offset(fdt, "/chosen");
+	if (chosen < 0)
+		return chosen;
+	/* Never leave a prior successful observation after a failed reread. */
+	publish_ret = fdt_delprop(fdt, chosen, "nothing,scp-recorded-partition");
+	if (publish_ret && publish_ret != -FDT_ERR_NOTFOUND)
+		return publish_ret;
+	publish_ret = fdt_setprop_u32(fdt, chosen,
+				      "nothing,scp-boot-control-error", ret);
+	if (publish_ret)
+		return publish_ret;
+	if (ret)
+		return ret;
+	partition = slot == TETRIS_SCP_SLOT_A ? "scp_a" : "scp_b";
+	printf("Tetris: SCP recorded partition=%s (not booted-slot proof)\n",
+	       partition);
+	return fdt_setprop_string(fdt, chosen,
+				 "nothing,scp-recorded-partition", partition);
+}
+
 static void tetris_observe_scp_containers(void *fdt)
 {
 	struct blk_desc *desc;
@@ -1579,6 +1613,9 @@ static void tetris_observe_scp_containers(void *fdt)
 		printf("Tetris: SCP container storage unavailable: %d\n", ret);
 		return;
 	}
+	ret = tetris_observe_scp_boot_control(fdt, desc);
+	if (ret)
+		printf("Tetris: SCP boot-control metadata unavailable: %d\n", ret);
 	ret = tetris_observe_scp_container(fdt, desc, "scp_a");
 	if (ret)
 		printf("Tetris: scp_a container unavailable: %d\n", ret);
