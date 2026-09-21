@@ -24,6 +24,7 @@ jobs:
             bison \
             build-essential \
             device-tree-compiler \
+            efitools \
             flex \
             gcc-aarch64-linux-gnu \
             git \
@@ -34,6 +35,7 @@ jobs:
             python3-pip \
             python3-setuptools \
             python3-venv \
+            sbsigntool \
             swig \
             uuid-dev
           sudo apt-get install -y zlib1g-dev
