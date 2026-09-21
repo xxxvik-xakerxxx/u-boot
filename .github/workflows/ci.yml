@@ -45,6 +45,10 @@ jobs:
             -r tools/binman/requirements.txt \
             -r tools/buildman/requirements.txt \
             -r tools/u_boot_pylib/requirements.txt
+          pip install -r tools/tetris-scp-security-requirements.txt
+
+      - name: Test SCP certificate and ciphertext verification
+        run: .venv/bin/python .github/tests/test_tetris_scp_security.py
 
       - name: Compile initramfs-only previous-bootloader handoff
         run: |
