@@ -72,6 +72,7 @@ jobs:
 
       - name: Compile initramfs-only previous-bootloader handoff
         run: |
+          . .venv/bin/activate
           make O=build-initramfs-only mt6878_tetris_defconfig
           scripts/config --file build-initramfs-only/.config \
             --disable SAVE_PREV_BL_FDT_ADDR \
@@ -81,6 +82,8 @@ jobs:
             --enable TETRIS_SCP_CRYPTO \
             --enable TETRIS_SCP_SECURITY
           make O=build-initramfs-only olddefconfig
+          make O=build-initramfs-only -j"$(nproc)" \
+            CROSS_COMPILE=aarch64-linux-gnu- tools
           make O=build-initramfs-only -j"$(nproc)" \
             CROSS_COMPILE=aarch64-linux-gnu- \
             arch/arm/lib/save_prev_bl_data.o \
