@@ -104,6 +104,10 @@ int padding_pkcs_15_verify(struct image_sign_info *info,
 			   const uint8_t *msg, int msg_len,
 			   const uint8_t *hash, int hash_len);
 
+/* expected_salt_len < 0 preserves the existing automatic salt length. */
+int padding_pss_verify_with_salt(struct image_sign_info *info,
+		       const uint8_t *msg, int msg_len,
+		       const uint8_t *hash, int hash_len, int expected_salt_len);
 int padding_pss_verify(struct image_sign_info *info,
 		       const uint8_t *msg, int msg_len,
 		       const uint8_t *hash, int hash_len);

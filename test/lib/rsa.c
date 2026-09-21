@@ -8,6 +8,7 @@
 
 #include <command.h>
 #include <image.h>
+#include <hexdump.h>
 #include <test/lib.h>
 #include <test/test.h>
 #include <test/ut.h>
@@ -201,3 +202,36 @@ static int lib_rsa_verify_invalid(struct unit_test_state *uts)
 }
 LIB_TEST(lib_rsa_verify_invalid, 0);
 #endif /* RSA_VERIFY_WITH_PKEY */
+
+#ifdef CONFIG_RSASSA_PSS
+static int lib_rsa_pss_salt(struct unit_test_state *uts)
+{
+	/* EMSA-PSS for SHA256("scp-test"), salt 00..1f, emBits=2047. */
+	static const char encoded[] =
+		"21300efcf5e07cbd62ddcbb31e34631a51b786b6823d114b528ebb1d16a146f1"
+		"d2ff035e7a0d69458d04d61c70348e7be5e706aab6ec92970867e2dbf63e2e0a"
+		"dce7487df6dcaa9a7ab0c0ff3a90155816542b8446e8657645104144678f4109"
+		"db16fef31bd5dea827d11ca64d7660b0aacd052ca5ad5803c8c11609f9fda361"
+		"0ce861df6c64beb6789ccda1da5b7bd7d4e354d72958a0ad5c15d9a416cbf5da"
+		"f200eaba9e27af52ff33c1d70005a46ddb3f30b519c6819dbbfc45786a2b5e03"
+		"29934caeaedc18763470905cd2b305d17703c62244a4a8e7f7d2c3d1ddcdffa4"
+		"8ba94ca01c61799f09a7cf3625b08586210a4490b3f073cfdb61e1e3b89611bc";
+	struct image_sign_info info = { 0 };
+	unsigned char msg[256], hash[32];
+
+	ut_assertok(hex2bin(msg, encoded, sizeof(msg)));
+	ut_assertok(hex2bin(hash,
+		"c39b808dac92bcc673c3f180abd91d46d190b0f876462ddf0ab15ad4c34256af", 32));
+	info.checksum = image_get_checksum_algo("sha256,rsa2048");
+	ut_assertnonnull(info.checksum);
+	ut_assertok(padding_pss_verify(&info, msg, 256, hash, 32));
+	ut_assertok(padding_pss_verify_with_salt(&info, msg, 256, hash, 32, 32));
+	ut_assert(padding_pss_verify_with_salt(&info, msg, 256, hash, 32, 0));
+	ut_assert(padding_pss_verify_with_salt(&info, msg, 256, hash, 32, 31));
+	ut_assert(padding_pss_verify_with_salt(&info, msg, 256, hash, 32, 33));
+	msg[255] ^= 1;
+	ut_assert(padding_pss_verify_with_salt(&info, msg, 256, hash, 32, 32));
+	return 0;
+}
+LIB_TEST(lib_rsa_pss_salt, 0);
+#endif

@@ -172,6 +172,18 @@ config TARGET_MT8518
 
 endchoice
 
+config TETRIS_SCP_SECURITY
+	bool "Build experimental Tetris SCP certificate verifier"
+	depends on TARGET_MT6878 && LEGACY_HASHING_AND_CRYPTO
+	select SHA256
+	select ASN1_DECODER
+	select RSA
+	select RSA_VERIFY_WITH_PKEY
+	select RSASSA_PSS
+	help
+	  Verify MediaTek SCP certificates and encrypted payloads against a
+	  caller-provisioned root pin. No automatic loader is enabled.
+
 config TETRIS_SCP_CRYPTO
 	bool "Build experimental Tetris SCP secure decryption transport"
 	depends on TARGET_MT6878

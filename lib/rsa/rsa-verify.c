@@ -205,9 +205,9 @@ out:
  *
  * Return:	0 if padding is correct, non-zero otherwise
  */
-int padding_pss_verify(struct image_sign_info *info,
+int padding_pss_verify_with_salt(struct image_sign_info *info,
 		       const uint8_t *msg, int msg_len,
-		       const uint8_t *hash, int hash_len)
+		       const uint8_t *hash, int hash_len, int expected_salt_len)
 {
 	const uint8_t *masked_db = NULL;
 	uint8_t *db_mask = NULL;
@@ -280,6 +280,10 @@ int padding_pss_verify(struct image_sign_info *info,
 
 	/* step 11 */
 	salt_len = db_len - db_padlen - 1;
+	if (expected_salt_len >= 0 && salt_len != expected_salt_len) {
+		ret = -EINVAL;
+		goto out;
+	}
 	salt = &db_nopad[1];
 
 	/* step 12 & 13 */
@@ -296,6 +300,13 @@ out:
 	free(db_mask);
 
 	return ret;
+}
+
+int padding_pss_verify(struct image_sign_info *info,
+		       const uint8_t *msg, int msg_len,
+		       const uint8_t *hash, int hash_len)
+{
+	return padding_pss_verify_with_salt(info, msg, msg_len, hash, hash_len, -1);
 }
 
 #ifndef USE_HOSTCC

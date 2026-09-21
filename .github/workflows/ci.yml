@@ -29,6 +29,7 @@ jobs:
             git \
             libgnutls28-dev \
             libssl-dev \
+            libsdl2-dev \
             python3 \
             python3-pip \
             python3-setuptools \
@@ -54,6 +55,16 @@ jobs:
       - name: Test SCP secure transport without hardware
         run: sh .github/tests/run_tetris_scp_crypto.sh
 
+      - name: Test runtime SCP certificate verifier
+        run: PYTHON=.venv/bin/python sh .github/tests/run_tetris_scp_security_c.sh
+
+      - name: Test strict RSA-PSS salt length with U-Boot crypto
+        run: |
+          . .venv/bin/activate
+          make O=build-sandbox sandbox_defconfig
+          make O=build-sandbox -j"$(nproc)"
+          build-sandbox/u-boot -T -c 'ut lib lib_rsa_pss_salt'
+
       - name: Check firmware reservation precedes initrd relocation
         run: python3 .github/tests/test_bootm_reservation_order.py
 
@@ -65,7 +76,8 @@ jobs:
             --enable SAVE_PREV_BL_INITRAMFS_START_ADDR \
             --enable TETRIS_SCP_HANDOFF_INVENTORY
           scripts/config --file build-initramfs-only/.config \
-            --enable TETRIS_SCP_CRYPTO
+            --enable TETRIS_SCP_CRYPTO \
+            --enable TETRIS_SCP_SECURITY
           make O=build-initramfs-only olddefconfig
           make O=build-initramfs-only -j"$(nproc)" \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -73,6 +85,8 @@ jobs:
             common/board_f.o \
             board/mediatek/mt6878/tetris_scp_handoff.o \
             board/mediatek/mt6878/tetris_scp_crypto.o \
+            board/mediatek/mt6878/tetris_scp_security.o \
+            board/mediatek/mt6878/tetris_scp_fields.asn1.o \
             board/mediatek/mt6878/mt6878_tetris.o
 
       - name: Configure

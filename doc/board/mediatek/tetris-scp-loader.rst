@@ -5,6 +5,40 @@ Status: SCP startup and sensors remain unimplemented. The offline verifier
 proves certificate/payload consistency, not hardware support. Experimental
 decryption transport exists but is not enabled or called by the board.
 
+Runtime certificate verification
+--------------------------------
+
+``CONFIG_TETRIS_SCP_SECURITY`` builds a C certificate/payload verifier using
+U-Boot's existing ASN.1 decoder and RSA implementation. It accepts an
+independently provisioned root-SPKI SHA256 pin, verifies root and delegated
+image signatures, checks the ciphertext hash, and returns the signed ciphertext
+hash, postprocess hash and wrapped material to the future loader. Failure
+clears the output. No keys, certificates or wrapped material are logged.
+
+The supported profile is RSA-2048 with exponent 65537, PSS/SHA256,
+MGF1-SHA256 and exactly 32 salt bytes. The new explicit-salt RSA helper leaves
+existing auto-salt callers unchanged. A sandbox regression vector covers both
+paths and rejection of incorrect required lengths. The parser bounds DER
+objects and field counts, rejects duplicate OIDs and validates raw RSA keys
+before passing PKCS#1 key data (not SPKI) to U-Boot's RSA parser.
+
+The audited vendor certificates carry sha256WithRSAEncryption in the signed
+TBS algorithm field but RSA-PSS in the outer field. This exact legacy label
+is accepted; verification still uses PSS only. Synthetic certificates with
+matching inner/outer PSS are also accepted. No other inner mismatch is allowed.
+
+Host tests run the actual C parser and ASN.1 engine with cryptography-backed
+RSA/hash callbacks, including every truncation of synthetic certificates.
+Both components of the local SCP dump also pass an offline equivalence test.
+That test derives a pin from its fixture only to compare parsers: it is NOT
+manufacturer-root trust or permission to boot that image. Vendor files are
+not included in CI or committed. CI also builds the real ARM64 adapter.
+
+The verifier remains default-off without a board caller. Root provisioning,
+rollback/image-identity policy, ATF compatibility, buffer ownership, active-slot
+selection and secure-loader orchestration are still required. A verified
+certificate alone does not authorize any SMC, TCM write or SCP reset.
+
 Experimental C transport
 ------------------------
 
