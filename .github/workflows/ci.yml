@@ -199,7 +199,7 @@ jobs:
           ]
           ccci_runtime = handler[
               handler.index("static const void *tetris_ccci_map"):
-              handler.index("void board_prep_linux")
+              handler.index("static int tetris_observe_scp_region_info")
           ]
           for forbidden in (
               "arm_smccc_smc(",
@@ -215,8 +215,37 @@ jobs:
               for scope in (ccci_parser, ccci_runtime):
                   if forbidden in scope:
                       raise SystemExit(
-                          f"CCCI observation gained a hardware side effect: {forbidden}"
-                      )
+                      f"CCCI observation gained a hardware side effect: {forbidden}"
+                  )
+
+          scp_runtime = handler[
+              handler.index("static int tetris_observe_scp_region_info"):
+              handler.index("void board_prep_linux")
+          ]
+          for required in (
+              "map_sysmem(TETRIS_SCP_TCM_BASE +",
+              "readl(",
+              "unmap_sysmem(mapped)",
+              '"nothing,scp-region-info-status"',
+              '"nothing,scp-region-info-size"',
+          ):
+              if required not in scp_runtime:
+                  raise SystemExit(f"missing bounded SCP observation: {required}")
+          for forbidden in (
+              "arm_smccc_smc(",
+              "writel(",
+              "setbits_",
+              "clrbits_",
+              "regulator_",
+              "clk_",
+              "reset_",
+              "request_irq(",
+              "dma_",
+          ):
+              if forbidden in scp_runtime:
+                  raise SystemExit(
+                      f"SCP observation gained a hardware side effect: {forbidden}"
+                  )
           if handler.index("tetris_observe_ccci_handoff(fdt)") > handler.index(
               "tetris_prepare_connsys_emi(fdt)",
               handler.index("void board_prep_linux"),
