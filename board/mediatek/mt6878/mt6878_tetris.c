@@ -46,6 +46,7 @@ static u64 tetris_test_get_le64(const void *ptr)
 #include <fdtdec.h>
 #include <init.h>
 #include <mapmem.h>
+#include <asm/cache.h>
 #include <asm/global_data.h>
 #include <asm/io.h>
 #include <asm/system.h>
