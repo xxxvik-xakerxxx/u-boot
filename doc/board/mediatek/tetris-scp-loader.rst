@@ -303,6 +303,9 @@ reset release; another hardware probe must wait for its CI artifact.
 Current r167 integration result, 2026-09-22
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+For canonical branches, successful master CI runs and archived diagnostic
+branches, see ``tetris-branch-status.rst``.
+
 The preceding failures are historical checkpoints, superseded for the tested
 profile by kernel ``7.2.1-r167`` with the same ``bf75c572e1`` U-Boot image
 from CI ``35718518185`` (LK SHA256 above). Boot
