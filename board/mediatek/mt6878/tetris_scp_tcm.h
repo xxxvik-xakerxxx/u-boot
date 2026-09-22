@@ -6,7 +6,7 @@
 struct tetris_scp_tcm_ops {
 	u32 (*read)(u64 address);
 	void (*write)(u64 address, u32 value);
-	void (*barrier)(void);
+	void (*sync)(void);
 };
 
 /* Caller authenticates the firmware and establishes exclusive ownership. */

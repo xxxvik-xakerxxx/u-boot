@@ -286,11 +286,11 @@ int tetris_scp_prepare_diagnostic(struct bootm_headers *images, void *fdt)
 	    overlaps(firmware, capacity, service, service_size) ||
 	    overlaps(firmware, capacity, images->initrd_start,
 		     images->initrd_end - images->initrd_start) ||
-	    overlaps(firmware, capacity, images->ft_addr, images->ft_len) ||
+	    overlaps(firmware, capacity, map_to_sysmem(images->ft_addr), images->ft_len) ||
 	    overlaps(firmware, capacity, images->os.load, images->os.end - images->os.start) ||
 	    overlaps(service, service_size, images->initrd_start,
 		     images->initrd_end - images->initrd_start) ||
-	    overlaps(service, service_size, images->ft_addr, images->ft_len) ||
+	    overlaps(service, service_size, map_to_sysmem(images->ft_addr), images->ft_len) ||
 	    overlaps(service, service_size, images->os.load, images->os.end - images->os.start)) {
 		ret = -ERANGE;
 		goto out;

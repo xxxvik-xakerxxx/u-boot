@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#define barrier() __asm__ __volatile__("" : : : "memory")
 #include "../../board/mediatek/mt6878/tetris_scp_tcm.c"
 
 static u32 memory[TCM_SIZE / 4];
@@ -33,13 +34,13 @@ static u32 read_word(u64 address)
 	return memory[(address - TCM) / 4] ^ (corrupt ? 1 : 0);
 }
 
-static void barrier(void) { barriers++; }
+static void sync_writes(void) { barriers++; }
 
 int main(void)
 {
 	static const u32 order[] = { 0xc0, 0xc4, 0xc8, 0xcc, 0xd0, 0xd4,
 		0xd8, 0x80, 0x84, 0x2c, 0xd8, 0x88, 0x8c, 0x90, 0x94 };
-	const struct tetris_scp_tcm_ops ops = { read_word, write_word, barrier };
+	const struct tetris_scp_tcm_ops ops = { read_word, write_word, sync_writes };
 	u8 core[LOADER_SIZE];
 	u32 i, j;
 

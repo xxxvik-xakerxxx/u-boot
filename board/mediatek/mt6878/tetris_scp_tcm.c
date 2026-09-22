@@ -45,7 +45,7 @@ int tetris_scp_tcm_prepare(const u8 *core, u32 core_size, u64 firmware,
 	u64 required;
 	u32 i, j, word;
 
-	if (!core || !ops || !ops->read || !ops->write || !ops->barrier ||
+	if (!core || !ops || !ops->read || !ops->write || !ops->sync ||
 	    core_size < LOADER_SIZE || core_size > CORE_CAPACITY ||
 	    !dram_size || dram_size > 0xe00000U || (dram_size & 15) ||
 	    firmware < 0x40000000ULL || firmware >= (1ULL << 32) ||
@@ -65,14 +65,14 @@ int tetris_scp_tcm_prepare(const u8 *core, u32 core_size, u64 firmware,
 	for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++)
 		for (j = 32; j; j--)
 			ops->write(0x1cb21000 + offsets[i], (1U << (j - 1)) - 1);
-	ops->barrier();
+	ops->sync();
 	/* Device memory: use aligned word accesses, never ordinary memset/memcpy. */
 	for (i = 0; i < TCM_SIZE; i += 4)
 		ops->write(TCM + i, 0);
 	for (i = 0; i < LOADER_SIZE; i += 4)
 		ops->write(TCM + i, loader_word(core, i, firmware, core_size,
 						  dram_size, scpctl));
-	ops->barrier();
+	ops->sync();
 	for (i = 0; i < LOADER_SIZE; i += 4)
 		if (ops->read(TCM + i) != loader_word(core, i, firmware, core_size,
 							 dram_size, scpctl))
