@@ -223,7 +223,31 @@ The secure plan tests validate layout, ordered arguments, every first-error
 boundary, and rejection of reuse after success/failure. Only full success
 publishes ``secure-dump=enable`` with the derived size and re-enables the
 Linux SCP node. U-Boot still never releases reset; kernel startup remains a
-separate hardware test. This secure diagnostic is not yet hardware-validated.
+separate hardware test.
+
+Secure diagnostic hardware result, 2026-09-22
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Commit ``9177841177``, CI ``35703856720``, was flashed only to lk_a;
+LK image SHA256:
+``659f360ffd561e9959d26e7e855fc8c03298d17ef03eda335ff2a013dadfd96a``.
+After full poweroff, r164 boot ``84392df4-d857-48ed-b457-ae99ebdacacf``
+reported ``secure-handoff-prepared``, prepare error 0, secure state 3/error 0,
+and valid region-info. All boot-only secure registrations completed.
+
+The subsequent single kernel SCP probe returned success, but firmware entered
+watchdog recovery about 0.2 seconds later without confirmed readiness.
+Core0 PC/LR were ``0x2e9da``/``0x1431a``; core1 ``0x139f4``/``0x139ec``.
+Read-only firmware disassembly places core0 in a two-byte initialization
+rendezvous immediately before the ready IPI path; core1 was at WFI.
+The cause of the missing rendezvous participant is not established.
+USB/SSH survived; the first failure was saved and the device cleanly rebooted.
+No sensor samples were obtained. Runtime recovery is not validated.
+
+Warm reboot retains nonzero TCM and is rejected at preflight with ``-16``;
+the SCP node remains disabled. The cold-start result is not warm-start or
+lifecycle support. Keep this diagnostic default-off and do not bypass the
+ownership guard to repeat a failed probe.
 
 Implement authoritative slot selection, certificate trust/policy, reserved
 service-page ownership and initialization, bounded SCP allocation, decrypt and
