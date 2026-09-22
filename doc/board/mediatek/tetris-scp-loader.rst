@@ -300,10 +300,41 @@ must not be promoted as working. Recovery boot
 The pmOS r166 candidate enables the existing logger receive path before
 reset release; another hardware probe must wait for its CI artifact.
 
-Implement authoritative slot selection, certificate trust/policy, reserved
-service-page ownership and initialization, bounded SCP allocation, decrypt and
-post-decrypt integrity verification, TCM power/copy ordering, region-info and
-secure registration. Then validate SCP ready, sensor samples and lifecycle
-without losing USB/SSH. Do not start SCP with ciphertext or bypass authentication
-because the bootloader is unlocked. The tested decryption and TCM stages are
-not substitutes for successful SCP ready, sensor samples and lifecycle tests.
+Current r167 integration result, 2026-09-22
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The preceding failures are historical checkpoints, superseded for the tested
+profile by kernel ``7.2.1-r167`` with the same ``bf75c572e1`` U-Boot image
+from CI ``35718518185`` (LK SHA256 above). Boot
+``126ad547-de18-4874-bd8d-959aaeadd4f4`` reached firmware readiness at 16.93 s
+through the explicitly enabled pmOS sensor service, without manual module
+loading. Inventory reported 24 sensors and physical sensor mask 31.
+Five-second captures measured accelerometer, gyroscope and magnetometer at
+approximately 25 Hz, light at 8.33 Hz and proximity as an on-change stream.
+Display/touch remained usable and a 32 MiB USB/SSH transfer passed.
+
+With the native iio-sensor-proxy HF backend and corrected mount matrix, the
+operator confirmed portrait and both landscape orientations, automatic
+brightness, and proximity blank/unblank during a GNOME Calls dummy call.
+The dummy call did not use a SIM and provides no evidence for cellular calls.
+Brightness changes remain visibly stepped; calibration, smoothing and sensor
+lifecycle are not closed. Backend packaging and evidence are maintained in
+``xxxvik-xakerxxx/nothing-tetris-pmaports`` main commit
+``7c0ce0389c03d2820155bde72192aca95281de8f``, especially
+``docs/SENSOR_DESKTOP_INTEGRATION.md``. Its integrated clean CI image still
+needs validation; the desktop backend was installed separately for live tests.
+
+This main-branch inclusion preserves guarded experimental support, rated
+Partial, not production-ready support. All three diagnostic Kconfig options
+remain default-off. To reproduce the installed loader profile in CI, dispatch
+``scp_prepare=true``, ``scp_tcm=true`` and ``scp_secure=true`` together;
+ordinary push builds do not enable SCP secure preparation. Inspect
+``BUILD-MANIFEST`` before selecting an artifact.
+
+Warm reboot still rejects nonzero TCM at preflight and leaves SCP disabled.
+Do not bypass that guard or reload hardware-owning vendor modules. Three
+controlled cold-start repeats, warm-start ownership, suspend/resume, stress,
+calibration and second-handset/firmware portability remain open. The pinned
+slot-A firmware authentication, plaintext integrity, bounds, dynamic LMB
+allocation and first-error guards remain mandatory. No arbitrary firmware
+acceptance, secure-boot bypass or general NOS 4.0 compatibility is claimed.
