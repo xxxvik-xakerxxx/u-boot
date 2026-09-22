@@ -172,6 +172,14 @@ config TARGET_MT8518
 
 endchoice
 
+config TETRIS_SCP_SECURE_DIAGNOSTIC
+	bool "Complete pinned SCP secure handoff (diagnostic only)"
+	depends on TETRIS_SCP_TCM_DIAGNOSTIC
+	help
+	  Register SCP feature/dump memory, firmware, region-info and protected
+	  ranges through the pinned ATF ABI. Enable the Linux secure recovery
+	  path only after success. This does not release SCP reset in U-Boot.
+
 config TETRIS_SCP_TCM_DIAGNOSTIC
 	bool "Prepare SCP TCM with reset held (diagnostic only)"
 	depends on TETRIS_SCP_PREPARE_DIAGNOSTIC

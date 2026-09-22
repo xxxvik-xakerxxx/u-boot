@@ -17,6 +17,11 @@ on:
         required: false
         type: boolean
         default: false
+      scp_secure:
+        description: 'Complete pinned ATF SCP handoff and enable Linux secure recovery'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-tetris:
@@ -69,6 +74,7 @@ jobs:
         run: |
           sh .github/tests/run_tetris_scp_crypto.sh
           sh .github/tests/run_tetris_scp_tcm.sh
+          sh .github/tests/run_tetris_scp_secure.sh
 
       - name: Test runtime SCP certificate verifier
         run: PYTHON=.venv/bin/python sh .github/tests/run_tetris_scp_security_c.sh
@@ -96,7 +102,8 @@ jobs:
             --enable TETRIS_SCP_SECURITY
           scripts/config --file build-initramfs-only/.config \
             --enable TETRIS_SCP_PREPARE_DIAGNOSTIC \
-            --enable TETRIS_SCP_TCM_DIAGNOSTIC
+            --enable TETRIS_SCP_TCM_DIAGNOSTIC \
+            --enable TETRIS_SCP_SECURE_DIAGNOSTIC
           make O=build-initramfs-only olddefconfig
           make O=build-initramfs-only -j"$(nproc)" \
             CROSS_COMPILE=aarch64-linux-gnu- tools
@@ -109,6 +116,7 @@ jobs:
             board/mediatek/mt6878/tetris_scp_security.o \
             board/mediatek/mt6878/tetris_scp_prepare.o \
             board/mediatek/mt6878/tetris_scp_tcm.o \
+            board/mediatek/mt6878/tetris_scp_secure.o \
             board/mediatek/mt6878/tetris_scp_fields.asn1.o \
             board/mediatek/mt6878/mt6878_tetris.o
 
@@ -116,6 +124,7 @@ jobs:
         env:
           SCP_PREPARE: ${{ inputs.scp_prepare || false }}
           SCP_TCM: ${{ inputs.scp_tcm || false }}
+          SCP_SECURE: ${{ inputs.scp_secure || false }}
         run: |
           . .venv/bin/activate
           make mt6878_tetris_defconfig
@@ -129,6 +138,12 @@ jobs:
             scripts/config --enable TETRIS_SCP_TCM_DIAGNOSTIC
             make olddefconfig
             grep -qx 'CONFIG_TETRIS_SCP_TCM_DIAGNOSTIC=y' .config
+          fi
+          if [ "$SCP_SECURE" = true ]; then
+            test "$SCP_TCM" = true
+            scripts/config --enable TETRIS_SCP_SECURE_DIAGNOSTIC
+            make olddefconfig
+            grep -qx 'CONFIG_TETRIS_SCP_SECURE_DIAGNOSTIC=y' .config
           fi
 
       - name: Test bounded LK CCCI handoff observation
@@ -464,6 +479,11 @@ jobs:
       - name: Write artifact checksums
         run: |
           printf 'commit=%s\n' "$GITHUB_SHA" > BUILD-MANIFEST
+          if grep -qx 'CONFIG_TETRIS_SCP_SECURE_DIAGNOSTIC=y' .config; then
+            printf 'scp_secure=slot-a-diagnostic\n' >> BUILD-MANIFEST
+          else
+            printf 'scp_secure=disabled\n' >> BUILD-MANIFEST
+          fi
           if grep -qx 'CONFIG_TETRIS_SCP_TCM_DIAGNOSTIC=y' .config; then
             printf 'scp_tcm=reset-held\n' >> BUILD-MANIFEST
           else

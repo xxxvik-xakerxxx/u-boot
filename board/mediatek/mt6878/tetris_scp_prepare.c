@@ -13,6 +13,7 @@
 #include <cpu_func.h>
 #include <asm/unaligned.h>
 #include <linux/libfdt.h>
+#include <linux/arm-smccc.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <u-boot/sha256.h>
@@ -20,6 +21,7 @@
 #include "tetris_scp_handoff.h"
 #include "tetris_scp_security.h"
 #include "tetris_scp_tcm.h"
+#include "tetris_scp_secure.h"
 
 #define PROFILE_CONTAINER_SIZE 0xa43070U
 #define PROFILE_ATF_SIZE 900240U
@@ -212,6 +214,80 @@ static int hash_partition(struct blk_desc *dev, const char *name, u64 offset,
 	return ret;
 }
 
+#if CONFIG_IS_ENABLED(TETRIS_SCP_SECURE_DIAGNOSTIC)
+static u64 secure_smc(u32 function, u64 operation, u64 a, u64 b, u64 c)
+{
+	struct arm_smccc_res result;
+
+	arm_smccc_smc(function, operation, a, b, c, 0, 0, 0, &result);
+	return result.a0;
+}
+
+static int prepare_secure(void *fdt, u8 *core, u64 base, u64 capacity,
+			  u32 core_size, u32 dram_size)
+{
+	const struct tetris_scp_secure_ops ops = { secure_smc, tcm_write, tcm_barrier };
+	struct tetris_scp_secure_plan plan;
+	const fdt32_t *data;
+	u32 table[75], dumps[5];
+	u64 shared, shared_size;
+	int node, length, cells, i, ret;
+
+	ret = reserved_range(fdt, "mediatek,reserve-memory-scp_share", &shared,
+			     &shared_size);
+	if (ret)
+		return ret;
+	if (overlaps(shared, shared_size, TETRIS_SCP_CRYPTO_PAGE_PA, 4096))
+		return -ERANGE;
+	node = fdt_node_offset_by_compatible(fdt, -1, "mediatek,scp");
+	if (node < 0)
+		return node;
+	data = fdt_getprop(fdt, node, "scp-mem-tbl", &length);
+	if (!data || length <= 0 || length > sizeof(table) || length % 12)
+		return -EINVAL;
+	cells = length / 4;
+	for (i = 0; i < cells; i++)
+		table[i] = fdt32_to_cpu(data[i]);
+	data = fdt_getprop(fdt, node, "memorydump", &length);
+	if (!data || length != sizeof(dumps))
+		return -EINVAL;
+	for (i = 0; i < 5; i++)
+		dumps[i] = fdt32_to_cpu(data[i]);
+	ret = tetris_scp_secure_plan(&plan, base, capacity, shared, shared_size,
+				    dram_size, table, cells, dumps);
+	if (ret)
+		return ret;
+	ret = tetris_scp_secure_begin(&plan, &ops);
+	if (!ret)
+		ret = prepare_tcm(fdt, core, base, capacity, core_size, dram_size);
+	if (!ret)
+		ret = tetris_scp_secure_finish(&plan, &ops);
+	printf("Tetris: SCP secure state=%u function=%x op=%u error=%llx ret=%d\n",
+	       plan.state, plan.last_function, plan.last_operation,
+	       (unsigned long long)plan.secure_error, ret);
+	if (!ret) {
+		node = fdt_node_offset_by_compatible(fdt, -1, "mediatek,scp");
+		ret = fdt_setprop_u32(fdt, node, "secure-dump-size", plan.dump_size);
+		if (!ret)
+			ret = fdt_setprop_string(fdt, node, "secure-dump", "enable");
+		/* Publish the consumer only after every secure call succeeded. */
+		if (!ret)
+			ret = fdt_setprop_string(fdt, node, "status", "okay");
+	}
+	node = fdt_path_offset(fdt, "/chosen");
+	if (node >= 0) {
+		int report = fdt_setprop_u32(fdt, node, "nothing,scp-secure-state", plan.state);
+		if (!report)
+			report = fdt_setprop_u32(fdt, node, "nothing,scp-secure-operation", plan.last_operation);
+		if (!report)
+			report = fdt_setprop_u64(fdt, node, "nothing,scp-secure-error", plan.secure_error);
+		if (report)
+			printf("Tetris: SCP secure diagnostic publication failed: %d\n", report);
+	}
+	return ret;
+}
+#endif
+
 int tetris_scp_prepare_diagnostic(struct bootm_headers *images, void *fdt)
 {
 	static bool attempted;
@@ -361,13 +437,21 @@ int tetris_scp_prepare_diagnostic(struct bootm_headers *images, void *fdt)
 #if CONFIG_IS_ENABLED(TETRIS_SCP_TCM_DIAGNOSTIC)
 	if (!ret) {
 		stage = "tcm-prepare";
+#if CONFIG_IS_ENABLED(TETRIS_SCP_SECURE_DIAGNOSTIC)
+		stage = "secure-handoff";
+		ret = prepare_secure(fdt, core, firmware, capacity,
+				     container.sections[0].payload_size,
+				     container.sections[3].payload_size);
+#else
 		ret = prepare_tcm(fdt, core, firmware, capacity,
 				  container.sections[0].payload_size,
 				  container.sections[3].payload_size);
+#endif
 		/* Property insertion can shift the chosen node's offset. */
 		chosen = fdt_path_offset(fdt, "/chosen");
 		if (!ret)
-			stage = "tcm-verified-reset-held";
+			stage = IS_ENABLED(CONFIG_TETRIS_SCP_SECURE_DIAGNOSTIC) ?
+				"secure-handoff-prepared" : "tcm-verified-reset-held";
 	}
 #endif
 out:

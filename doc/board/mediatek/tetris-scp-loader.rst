@@ -201,12 +201,34 @@ clear/copy boundaries, invalid input without MMIO and readback failure.
 This option unconditionally disables the Linux SCP node, including on stale
 TCM or failure paths: secure registration is not complete and the kernel must
 not consume this intermediate state. Reset remains asserted. The TCM hardware
-path is not yet validated; neither option advertises working sensors.
+path passed on boot ``7249e562-fff9-4cb8-bd1c-32c492064ae2`` with
+``d965233d2f``/CI ``35702796137``: stage ``tcm-verified-reset-held``, error 0,
+region-info ``ok``, size 60. Linux/systemd and USB/SSH survived; sensors were
+not started. Image SHA256:
+``5d12bbe40474a362459fe8e93ecc1133e86fb6c6996a8bff23323943dec60530``.
+
+``CONFIG_TETRIS_SCP_SECURE_DIAGNOSTIC``/CI ``scp_secure=true`` adds the pinned
+boot-only secure handoff, requiring both earlier diagnostic options. It derives
+feature offsets and dump sizes from the Linux DT tables and verifies the
+shared no-map reservation, firmware bounds and alignments before secure calls.
+LK orders feature registrations (operation 9), dump offsets (7), firmware
+mapping (2), TCM preparation, DRAM range (1), region-info snapshot (3), the
+three magic-register writes, protection (4/5), firmware EMI region 26,
+shared range (0) and shared EMI region 27. EMI calls use ``0x82000415``
+operation 0 with page-shifted boundaries, as traced in LK ``0x7ef84``.
+ATF ``0x10380`` makes regions 26/27 one-shot on this boot; do not retry after
+an error or assume zero means Linux runtime recovery has been tested.
+
+The secure plan tests validate layout, ordered arguments, every first-error
+boundary, and rejection of reuse after success/failure. Only full success
+publishes ``secure-dump=enable`` with the derived size and re-enables the
+Linux SCP node. U-Boot still never releases reset; kernel startup remains a
+separate hardware test. This secure diagnostic is not yet hardware-validated.
 
 Implement authoritative slot selection, certificate trust/policy, reserved
 service-page ownership and initialization, bounded SCP allocation, decrypt and
 post-decrypt integrity verification, TCM power/copy ordering, region-info and
 secure registration. Then validate SCP ready, sensor samples and lifecycle
 without losing USB/SSH. Do not start SCP with ciphertext or bypass authentication
-because the bootloader is unlocked. This verifier is not installed on the phone
-and is not a substitute for that runtime loader.
+because the bootloader is unlocked. The tested decryption and TCM stages are
+not substitutes for successful SCP ready, sensor samples and lifecycle tests.
