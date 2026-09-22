@@ -172,9 +172,23 @@ config TARGET_MT8518
 
 endchoice
 
+config TETRIS_SCP_PREPARE_DIAGNOSTIC
+	bool "Run slot-A SCP preparation diagnostic before Linux"
+	depends on TARGET_MT6878 && LEGACY_HASHING_AND_CRYPTO
+	select TETRIS_SCP_HANDOFF_INVENTORY
+	select TETRIS_SCP_SECURITY
+	help
+	  Controlled experiment only: the operator must establish that this
+	  image boots from lk_a with the audited tee_a. Checks the exact ATF
+	  and SCP profile, authenticates and decrypts into reserved memory.
+	  Never selects another slot, writes storage, copies TCM or starts SCP.
+	  Normal builds leave this disabled. Not universal firmware support.
+
 config TETRIS_SCP_SECURITY
 	bool "Build experimental Tetris SCP certificate verifier"
 	depends on TARGET_MT6878 && LEGACY_HASHING_AND_CRYPTO
+	select IMAGE_SIGN_INFO
+	select HASH
 	select SHA256
 	select ASN1_DECODER
 	select RSA

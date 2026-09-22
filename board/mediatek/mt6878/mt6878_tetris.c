@@ -58,6 +58,7 @@ static u64 tetris_test_get_le64(const void *ptr)
 #include <string.h>
 
 #include "tetris_scp_handoff.h"
+#include "tetris_scp_security.h"
 #endif
 
 #define TETRIS_CCCI_MAX_INFO_SIZE	0x10000U
@@ -1642,6 +1643,8 @@ void board_prep_linux(struct bootm_headers *images)
 			printf("Tetris: SCP region-info unavailable: %d\n", ret);
 		tetris_observe_scp_containers(fdt);
 	}
+	if (IS_ENABLED(CONFIG_TETRIS_SCP_PREPARE_DIAGNOSTIC))
+		tetris_scp_prepare_diagnostic(images, fdt);
 
 	ret = tetris_handoff_devinfo(fdt);
 	if (ret)

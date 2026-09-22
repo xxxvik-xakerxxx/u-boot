@@ -51,6 +51,8 @@ int tetris_scp_authenticate(const void *cert1, size_t size1,
 			    struct tetris_scp_security_metadata *metadata);
 
 #ifndef TETRIS_SCP_SECURITY_HOST_TEST
+struct bootm_headers;
+int tetris_scp_prepare_diagnostic(struct bootm_headers *images, void *fdt);
 extern const struct tetris_scp_security_ops tetris_scp_security_hw_ops;
 #endif
 #endif

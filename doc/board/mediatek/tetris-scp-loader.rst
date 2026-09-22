@@ -166,6 +166,23 @@ These observations are specific to those binaries, not every Nothing release.
 Runtime work still required
 ---------------------------
 
+A default-off ``CONFIG_TETRIS_SCP_PREPARE_DIAGNOSTIC`` now connects the
+verifier and secure transport to the board boot path. Dispatch CI with
+``scp_prepare=true`` to build it; ``BUILD-MANIFEST`` distinguishes this image
+from the ordinary, disabled build. This is a slot-A experiment, not automatic
+firmware selection: the operator must establish the actual LK/ATF boot slot
+before flashing. The misc record is an additional consistency check only.
+
+The diagnostic requires the pinned ATF payload and complete logical SCP
+container identities, authenticates both component certificates and hashes,
+and checks DT/LMB no-map ownership and boot-image overlap before writing the
+firmware reservation. It then decrypts core and DRAM using the reserved
+service page, checking each plaintext hash. No TCM power/copy, secure SCP
+registration or reset release is performed. A failure is not retried.
+``/chosen/nothing,scp-prepare-stage`` and ``nothing,scp-prepare-error`` report
+the outcome; the plaintext region-info size is published only after both
+component hashes pass. Hardware decryption remains untested at this commit.
+
 Implement authoritative slot selection, certificate trust/policy, reserved
 service-page ownership and initialization, bounded SCP allocation, decrypt and
 post-decrypt integrity verification, TCM power/copy ordering, region-info and

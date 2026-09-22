@@ -6,6 +6,12 @@ on:
       - "**"
   pull_request:
   workflow_dispatch:
+    inputs:
+      scp_prepare:
+        description: 'Enable audited slot-A SCP decryption experiment (no TCM/reset)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-tetris:
@@ -81,6 +87,8 @@ jobs:
           scripts/config --file build-initramfs-only/.config \
             --enable TETRIS_SCP_CRYPTO \
             --enable TETRIS_SCP_SECURITY
+          scripts/config --file build-initramfs-only/.config \
+            --enable TETRIS_SCP_PREPARE_DIAGNOSTIC
           make O=build-initramfs-only olddefconfig
           make O=build-initramfs-only -j"$(nproc)" \
             CROSS_COMPILE=aarch64-linux-gnu- tools
@@ -91,13 +99,21 @@ jobs:
             board/mediatek/mt6878/tetris_scp_handoff.o \
             board/mediatek/mt6878/tetris_scp_crypto.o \
             board/mediatek/mt6878/tetris_scp_security.o \
+            board/mediatek/mt6878/tetris_scp_prepare.o \
             board/mediatek/mt6878/tetris_scp_fields.asn1.o \
             board/mediatek/mt6878/mt6878_tetris.o
 
       - name: Configure
+        env:
+          SCP_PREPARE: ${{ inputs.scp_prepare || false }}
         run: |
           . .venv/bin/activate
           make mt6878_tetris_defconfig
+          if [ "$SCP_PREPARE" = true ]; then
+            scripts/config --enable TETRIS_SCP_PREPARE_DIAGNOSTIC
+            make olddefconfig
+            grep -qx 'CONFIG_TETRIS_SCP_PREPARE_DIAGNOSTIC=y' .config
+          fi
 
       - name: Test bounded LK CCCI handoff observation
         run: |
@@ -431,6 +447,12 @@ jobs:
 
       - name: Write artifact checksums
         run: |
+          printf 'commit=%s\n' "$GITHUB_SHA" > BUILD-MANIFEST
+          if grep -qx 'CONFIG_TETRIS_SCP_PREPARE_DIAGNOSTIC=y' .config; then
+            printf 'scp_prepare=slot-a-diagnostic\n' >> BUILD-MANIFEST
+          else
+            printf 'scp_prepare=disabled\n' >> BUILD-MANIFEST
+          fi
           sha256sum \
             u-boot.bin \
             u-boot-tetris-lk.img \
@@ -448,5 +470,6 @@ jobs:
             u-boot-tetris-lk.img
             u-boot-nodtb.bin
             u-boot.map
+            BUILD-MANIFEST
             SHA256SUMS
           if-no-files-found: error
