@@ -283,8 +283,22 @@ the pinned ATF rejects zero-sized entries. Failure is terminal for this boot;
 there are no retries, watchdog changes or automatic Linux module loads.
 Host ASan/UBSan tests cover boundaries, overlaps, alternate bases, duplicate
 ownership, call order and each first-error boundary. This remains an untested
-hardware candidate until a cold boot produces READY and actual sensor data.
+runtime candidate until a cold boot produces READY and actual sensor data.
 It does not enable an audio Linux driver or establish NOS 4.0 compatibility.
+
+CI ``35718518185`` for ``bf75c572e1`` passed; verified LK SHA256
+``7fd5bb218af3d3371dca59930f320ba98d38ddba6cbf7229851c33ba746d62fe``
+was flashed only to lk_a. Warm boot passed display/touch (user confirmed)
+and a 32 MiB USB/SSH transfer. Cold boot
+``614a39d4-2533-4686-87b4-f11263c2d155`` passed secure registration with
+state 3/error 0 and audio allocation at 0x9d000000, size 0x9c0000.
+The subsequent one-shot SCP probe panicked the AP kernel at mtk-mbox.c:561:
+IPI 21 (LOGGER_CTRL) had no receive buffer. The r165 module did not enable
+the vendor logger C feature. No READY or samples were captured; this candidate
+must not be promoted as working. Recovery boot
+``8eb5aae7-1ba1-4fc3-9838-fcd56b9f1a01`` restored systemd and USB/SSH.
+The pmOS r166 candidate enables the existing logger receive path before
+reset release; another hardware probe must wait for its CI artifact.
 
 Implement authoritative slot selection, certificate trust/policy, reserved
 service-page ownership and initialization, bounded SCP allocation, decrypt and
