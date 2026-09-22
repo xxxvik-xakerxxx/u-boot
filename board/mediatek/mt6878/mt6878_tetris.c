@@ -1645,6 +1645,8 @@ void board_prep_linux(struct bootm_headers *images)
 	}
 	if (IS_ENABLED(CONFIG_TETRIS_SCP_PREPARE_DIAGNOSTIC))
 		tetris_scp_prepare_diagnostic(images, fdt);
+	if (IS_ENABLED(CONFIG_TETRIS_SCP_TCM_DIAGNOSTIC))
+		tetris_observe_scp_region_info(fdt);
 
 	ret = tetris_handoff_devinfo(fdt);
 	if (ret)

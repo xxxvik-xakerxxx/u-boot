@@ -181,7 +181,27 @@ service page, checking each plaintext hash. No TCM power/copy, secure SCP
 registration or reset release is performed. A failure is not retried.
 ``/chosen/nothing,scp-prepare-stage`` and ``nothing,scp-prepare-error`` report
 the outcome; the plaintext region-info size is published only after both
-component hashes pass. Hardware decryption remains untested at this commit.
+component hashes pass.
+
+CI ``35701102610`` built commit ``8066a9a1ee`` with this option enabled.
+LK image SHA256:
+``691164969062e9728178de4a8da7c9e7ee48b5185908def7e1f1bb150596a22d``.
+After flashing only lk_a, boot ``ccf7199a-cd40-401b-a0c8-90e8f7b3018d``
+on r164 reported ``plaintext-verified``, error zero and plaintext region-info
+size 60. USB/SSH and systemd remained running. This verifies real secure
+decryption of both components on this handset/profile, not sensor startup.
+
+The additional default-off ``CONFIG_TETRIS_SCP_TCM_DIAGNOSTIC`` (CI input
+``scp_tcm=true``, requiring ``scp_prepare=true``) copies the DRAM backup,
+replays the pinned SRAM power sequence, clears TCM with aligned device-memory
+accesses, copies the 8192-byte loader and fills the 60-byte region-info.
+The loader is checked by reading all 8192 bytes back. Host sanitizer tests
+check all 480 ordered SRAM writes, preserved RMW bits, header offsets,
+clear/copy boundaries, invalid input without MMIO and readback failure.
+This option unconditionally disables the Linux SCP node, including on stale
+TCM or failure paths: secure registration is not complete and the kernel must
+not consume this intermediate state. Reset remains asserted. The TCM hardware
+path is not yet validated; neither option advertises working sensors.
 
 Implement authoritative slot selection, certificate trust/policy, reserved
 service-page ownership and initialization, bounded SCP allocation, decrypt and

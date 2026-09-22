@@ -9,6 +9,8 @@
 #include <part.h>
 #include <stdio.h>
 #include <asm/cache.h>
+#include <asm/io.h>
+#include <cpu_func.h>
 #include <asm/unaligned.h>
 #include <linux/libfdt.h>
 #include <linux/kernel.h>
@@ -17,12 +19,70 @@
 #include "tetris_scp_crypto.h"
 #include "tetris_scp_handoff.h"
 #include "tetris_scp_security.h"
+#include "tetris_scp_tcm.h"
 
 #define PROFILE_CONTAINER_SIZE 0xa43070U
 #define PROFILE_ATF_SIZE 900240U
 #define CORE_CAPACITY 0x700000U
 #define DRAM_CAPACITY 0xe00000U
 #define CERT_CAPACITY 16384U
+
+#if CONFIG_IS_ENABLED(TETRIS_SCP_TCM_DIAGNOSTIC)
+static u32 tcm_read(u64 address)
+{
+	return readl((void *)(unsigned long)address);
+}
+
+static void tcm_write(u64 address, u32 value)
+{
+	writel(value, (void *)(unsigned long)address);
+}
+
+static void tcm_barrier(void)
+{
+	mb();
+}
+
+static int prepare_tcm(void *fdt, u8 *core, u64 base, u64 capacity,
+		       u32 core_size, u32 dram_size)
+{
+	const struct tetris_scp_tcm_ops ops = { tcm_read, tcm_write, tcm_barrier };
+	const char *control;
+	const fdt32_t *sram;
+	fdt_size_t bytes;
+	fdt_addr_t address;
+	u64 backup = CORE_CAPACITY + ALIGN((u64)dram_size, 1024);
+	int node, index, length, ret;
+
+	node = fdt_node_offset_by_compatible(fdt, -1, "mediatek,scp");
+	if (node < 0 || fdt_node_offset_by_compatible(fdt, node,
+					"mediatek,scp") != -FDT_ERR_NOTFOUND)
+		return -EINVAL;
+	index = fdt_stringlist_search(fdt, node, "reg-names", "scp_sram_base");
+	if (index < 0)
+		return index;
+	address = fdtdec_get_addr_size_auto_noparent(fdt, node, "reg", index,
+						   &bytes, true);
+	sram = fdt_getprop(fdt, node, "scp-sram-size", &length);
+	if (address != 0x1c400000 || bytes != 0x100000 || !sram || length != 4 ||
+	    fdt32_to_cpu(*sram) != 0x100000 || core_size < 8192 ||
+	    get_unaligned_le32(core + 32) != 60 || backup > capacity ||
+	    dram_size > capacity - backup)
+		return -ERANGE;
+	/* LK treats missing scpctl as zero; reject unsupported nonzero policy. */
+	control = fdt_getprop(fdt, node, "scpctl", &length);
+	if (control && (length != 2 || memcmp(control, "0", 2)))
+		return -EOPNOTSUPP;
+	/* Incomplete secure handoff must never be consumed by a Linux probe. */
+	ret = fdt_setprop_string(fdt, node, "status", "disabled");
+	if (ret)
+		return ret;
+	memcpy(core + backup, core + CORE_CAPACITY, dram_size);
+	flush_dcache_range((unsigned long)core,
+		(unsigned long)core + ALIGN(backup + dram_size, ARCH_DMA_MINALIGN));
+	return tetris_scp_tcm_prepare(core, core_size, base, capacity, dram_size, 0, &ops);
+}
+#endif
 
 /* Firmware-version identities, not per-device calibration or secrets. */
 static const u8 atf_hash[32] = {
@@ -173,6 +233,18 @@ int tetris_scp_prepare_diagnostic(struct bootm_headers *images, void *fdt)
 	if (attempted)
 		return -EALREADY;
 	attempted = true;
+#if CONFIG_IS_ENABLED(TETRIS_SCP_TCM_DIAGNOSTIC)
+	/* Also block the consumer on a warm boot with stale, nonzero TCM. */
+	{
+		int node = fdt_node_offset_by_compatible(fdt, -1, "mediatek,scp");
+
+		ret = node < 0 ? node :
+			fdt_setprop_string(fdt, node, "status", "disabled");
+		chosen = fdt_path_offset(fdt, "/chosen");
+		if (ret)
+			goto out;
+	}
+#endif
 	status = chosen < 0 ? NULL : fdt_getprop(fdt, chosen,
 					"nothing,scp-region-info-status", &len);
 	if (!status || len != 5 || memcmp(status, "zero", 5)) {
@@ -247,7 +319,7 @@ int tetris_scp_prepare_diagnostic(struct bootm_headers *images, void *fdt)
 	}
 	cert1 = malloc(CERT_CAPACITY);
 	cert2 = malloc(CERT_CAPACITY);
-	core = map_sysmem(firmware, CORE_CAPACITY + DRAM_CAPACITY);
+	core = map_sysmem(firmware, capacity);
 	page = map_sysmem(service, service_size);
 	if (!cert1 || !cert2 || !core || !page) {
 		ret = -ENOMEM;
@@ -286,6 +358,18 @@ int tetris_scp_prepare_diagnostic(struct bootm_headers *images, void *fdt)
 	if (chosen >= 0)
 		ret = fdt_setprop_u32(fdt, chosen, "nothing,scp-plaintext-region-size",
 				get_unaligned_le32(core + 4 + 28));
+#if CONFIG_IS_ENABLED(TETRIS_SCP_TCM_DIAGNOSTIC)
+	if (!ret) {
+		stage = "tcm-prepare";
+		ret = prepare_tcm(fdt, core, firmware, capacity,
+				  container.sections[0].payload_size,
+				  container.sections[3].payload_size);
+		/* Property insertion can shift the chosen node's offset. */
+		chosen = fdt_path_offset(fdt, "/chosen");
+		if (!ret)
+			stage = "tcm-verified-reset-held";
+	}
+#endif
 out:
 	free(cert1);
 	free(cert2);
@@ -302,6 +386,6 @@ out:
 		if (report)
 			printf("Tetris: SCP diagnostic FDT report error=%d\n", report);
 	}
-	printf("Tetris: SCP prepare stage=%s error=%d (no TCM/reset)\n", stage, ret);
+	printf("Tetris: SCP prepare stage=%s error=%d (reset not released)\n", stage, ret);
 	return ret;
 }

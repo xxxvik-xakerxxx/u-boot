@@ -172,6 +172,15 @@ config TARGET_MT8518
 
 endchoice
 
+config TETRIS_SCP_TCM_DIAGNOSTIC
+	bool "Prepare SCP TCM with reset held (diagnostic only)"
+	depends on TETRIS_SCP_PREPARE_DIAGNOSTIC
+	help
+	  After verified decryption, reproduce the pinned MT6878 SRAM sequence
+	  and read back the loader and 60-byte region-info. Disable the Linux
+	  SCP node because secure registration is not yet completed. No reset
+	  release or sensor startup is performed.
+
 config TETRIS_SCP_PREPARE_DIAGNOSTIC
 	bool "Run slot-A SCP preparation diagnostic before Linux"
 	depends on TARGET_MT6878 && LEGACY_HASHING_AND_CRYPTO
