@@ -8,6 +8,8 @@ struct tetris_scp_secure_plan {
 	u32 dram_size, dump_size, offsets[25], sizes[25], dumps[6];
 	u32 state, last_function, last_operation;
 	u64 secure_error;
+	u64 audio, audio_size;
+	u32 audio_offsets[4], audio_sizes[4];
 };
 
 struct tetris_scp_secure_ops {
@@ -22,6 +24,8 @@ int tetris_scp_secure_plan(struct tetris_scp_secure_plan *p,
 			   const u32 dumps[5]);
 int tetris_scp_secure_begin(struct tetris_scp_secure_plan *p,
 			    const struct tetris_scp_secure_ops *ops);
+int tetris_scp_secure_audio_plan(struct tetris_scp_secure_plan *p,
+				u64 base, u64 capacity, const u32 sizes[4]);
 int tetris_scp_secure_finish(struct tetris_scp_secure_plan *p,
 			     const struct tetris_scp_secure_ops *ops);
 #endif

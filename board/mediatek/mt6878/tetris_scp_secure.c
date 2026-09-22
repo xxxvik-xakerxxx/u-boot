@@ -11,6 +11,37 @@
 
 #define SCP_BOOT 0xc200040fU
 #define EMI_REGION 0x82000415U
+#define AUDIO_BOOT 0xc2000419U
+
+int tetris_scp_secure_audio_plan(struct tetris_scp_secure_plan *p,
+				u64 base, u64 capacity, const u32 sizes[4])
+{
+	u64 offset = 0;
+	u32 offsets[4];
+	unsigned int i;
+
+	if (!p || p->state != 1 || p->audio || !sizes ||
+	    base < 0x40000000ULL || base >= 0xa0000000ULL ||
+	    (base & 0xffffff) || !capacity || (capacity & 0xffff) ||
+	    capacity > 0x1000000 || capacity > 0xa0000000ULL - base ||
+	    (base < p->firmware + p->capacity && p->firmware < base + capacity) ||
+	    (base < p->shared + p->shared_size && p->shared < base + capacity))
+		return -EINVAL;
+	for (i = 0; i < 4; i++) {
+		if (!sizes[i] || sizes[i] > 0x1000000 ||
+		    offset > capacity || sizes[i] > capacity - offset)
+			return -ERANGE;
+		offsets[i] = offset;
+		offset += ((u64)sizes[i] + 4095) & ~4095ULL;
+	}
+	if (((offset + 65535) & ~65535ULL) != capacity)
+		return -ERANGE;
+	memcpy(p->audio_offsets, offsets, sizeof(offsets));
+	memcpy(p->audio_sizes, sizes, sizeof(p->audio_sizes));
+	p->audio = base;
+	p->audio_size = capacity;
+	return 0;
+}
 
 int tetris_scp_secure_plan(struct tetris_scp_secure_plan *p,
 			   u64 firmware, u64 capacity, u64 shared, u64 shared_size,
@@ -97,10 +128,23 @@ int tetris_scp_secure_begin(struct tetris_scp_secure_plan *p,
 	u32 i;
 	int ret;
 
-	if (!p || p->state != 1 || !ops || !ops->smc || !ops->write || !ops->sync)
+	if (!p || p->state != 1 || !p->audio || !ops || !ops->smc || !ops->write || !ops->sync)
 		return -EINVAL;
 	/* Mark attempted before the first call; no reuse after partial success. */
 	p->state = 4;
+	/* LK publishes the audio table before registering its separate bank. */
+	for (i = 0; i < 4; i++) {
+		ret = call(p, ops, AUDIO_BOOT, 1, i,
+			   p->audio_offsets[i], p->audio_sizes[i]);
+		if (ret)
+			return ret;
+	}
+	ret = call(p, ops, SCP_BOOT, 8, 5, p->audio, p->audio_size);
+	if (!ret)
+		ret = call(p, ops, EMI_REGION, 0, p->audio >> 12,
+			   (p->audio + p->audio_size) >> 12, 29);
+	if (ret)
+		return ret;
 	for (i = 0; i < 25; i++) {
 		if (!p->sizes[i])
 			continue;

@@ -240,7 +240,7 @@ watchdog recovery about 0.2 seconds later without confirmed readiness.
 Core0 PC/LR were ``0x2e9da``/``0x1431a``; core1 ``0x139f4``/``0x139ec``.
 Read-only firmware disassembly places core0 in a two-byte initialization
 rendezvous immediately before the ready IPI path; core1 was at WFI.
-The cause of the missing rendezvous participant is not established.
+The later r165 dump below identifies the missing participant's ASSERT.
 USB/SSH survived; the first failure was saved and the device cleanly rebooted.
 No sensor samples were obtained. Runtime recovery is not validated.
 
@@ -248,6 +248,43 @@ Warm reboot retains nonzero TCM and is rejected at preflight with ``-16``;
 the SCP node remains disabled. The cold-start result is not warm-start or
 lifecycle support. Keep this diagnostic default-off and do not bypass the
 ownership guard to repeat a failed probe.
+
+r165 audio-memory assertion and candidate fix
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The first complete r165 SCP dump (11,454,272 bytes, SHA256
+``b02bc1be5190c076889d7c0a86b1bd42e2c99f6a50e38500a7e5ec7aef6f6f88``)
+contains core1 ``audio_get_common_shared_mem()`` failure: AP base and size
+are zero, followed by ASSERT in audio/utility/utility.c:149. Core1 WFI is
+post-assert. The real rendezvous flags are at ``0xe3b24`` and contain 1,0.
+Holding the 26 MHz vote did not prevent this failure. Sensors remain Broken.
+
+The pinned LK calls ``0xc2000419`` operation 1 to register audio offsets and
+sizes at ``0x1710c..0x17204``, then SCP_BOOT operation 8, bank 5 at
+``0x172ac``. The latter publishes the separately allocated
+``adsp_shared_reserved`` region. LK applies EMI region 29 at ``0x172d4``.
+ATF handlers ``0x1f444`` and ``0x2b740`` validate/store these two tables.
+This is separate from SCP feature-memory ID 4. No authentication bypass or
+firmware modification is involved.
+
+The candidate uses the matching vendor commit
+``ee2be53cb75670b548948636a0db1d1ff112bf12`` MT6878 DT audio property order:
+logger 0x180000, IPI DMA 0x200000, audio 0x5c0000, XHCI 0x80000.
+Offsets are page aligned and the total is rounded to 64 KiB as in LK.
+The default-off exact-image diagnostic profile reserves 0x9c0000 bytes
+through LMB, aligned to 16 MiB below 0xa0000000, and publishes a Linux
+no-map reservation. No observed handset address is reused. An existing
+audio owner is rejected, not overwritten. The allocation is zeroed/flushed
+before registration; it remains reserved if later registration fails.
+
+All four nonempty entries, bank 5 and EMI region 29 must succeed before the
+existing SCP preparation continues. The stock fifth empty entry is omitted:
+the pinned ATF rejects zero-sized entries. Failure is terminal for this boot;
+there are no retries, watchdog changes or automatic Linux module loads.
+Host ASan/UBSan tests cover boundaries, overlaps, alternate bases, duplicate
+ownership, call order and each first-error boundary. This remains an untested
+hardware candidate until a cold boot produces READY and actual sensor data.
+It does not enable an audio Linux driver or establish NOS 4.0 compatibility.
 
 Implement authoritative slot selection, certificate trust/policy, reserved
 service-page ownership and initialization, bounded SCP allocation, decrypt and

@@ -223,6 +223,50 @@ static u64 secure_smc(u32 function, u64 operation, u64 a, u64 b, u64 c)
 	return result.a0;
 }
 
+static int prepare_audio_memory(void *fdt, struct tetris_scp_secure_plan *plan)
+{
+	/* Pinned MT6878 DT property order: logger, IPI DMA, audio, XHCI.
+	 * This profile is already gated by exact ATF and SCP image hashes.
+	 */
+	static const u32 sizes[] = { 0x180000, 0x200000, 0x5c0000, 0x80000 };
+	const char *compatible = "mediatek,reserve-memory-adsp_share";
+	struct fdt_memory memory;
+	phys_addr_t base = 0xa0000000;
+	u64 size = 0;
+	unsigned int i;
+	int ret;
+
+	/* Never overwrite another audio owner's reservation or table. */
+	if (fdt_node_offset_by_compatible(fdt, -1, compatible) != -FDT_ERR_NOTFOUND ||
+	    fdt_node_offset_by_compatible(fdt, -1, "mediatek,scp-audio-mbox") !=
+							-FDT_ERR_NOTFOUND)
+		return -EEXIST;
+	for (i = 0; i < ARRAY_SIZE(sizes); i++)
+		size += ALIGN((u64)sizes[i], 4096);
+	size = ALIGN(size, 65536);
+	ret = lmb_alloc_mem(LMB_MEM_ALLOC_MAX, 0x1000000, &base, size,
+			    LMB_NOMAP | LMB_NOOVERWRITE);
+	if (ret)
+		return ret;
+	ret = tetris_scp_secure_audio_plan(plan, base, size, sizes);
+	if (ret) {
+		lmb_free(base, size, LMB_NOMAP | LMB_NOOVERWRITE);
+		return ret;
+	}
+	memory.start = base;
+	memory.end = base + size - 1;
+	ret = fdtdec_add_reserved_memory(fdt, "scp-audio", &memory, &compatible,
+					1, NULL, FDTDEC_RESERVED_MEMORY_NO_MAP);
+	/* Keep LMB ownership on DT errors; partial publication must not alias RAM. */
+	if (ret)
+		return ret;
+	memset((void *)(unsigned long)base, 0, size);
+	flush_dcache_range(base, base + size);
+	printf("Tetris: SCP audio memory %llx size %llx reserved (diagnostic)\n",
+	       (unsigned long long)base, (unsigned long long)size);
+	return 0;
+}
+
 static int prepare_secure(void *fdt, u8 *core, u64 base, u64 capacity,
 			  u32 core_size, u32 dram_size)
 {
@@ -255,6 +299,9 @@ static int prepare_secure(void *fdt, u8 *core, u64 base, u64 capacity,
 		dumps[i] = fdt32_to_cpu(data[i]);
 	ret = tetris_scp_secure_plan(&plan, base, capacity, shared, shared_size,
 				    dram_size, table, cells, dumps);
+	if (ret)
+		return ret;
+	ret = prepare_audio_memory(fdt, &plan);
 	if (ret)
 		return ret;
 	ret = tetris_scp_secure_begin(&plan, &ops);
