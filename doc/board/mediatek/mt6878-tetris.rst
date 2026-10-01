@@ -25,22 +25,37 @@ Tetris LK template. Verify ``SHA256SUMS`` before flashing it.
 Install
 -------
 
+Read the `current installation guide and FAQ
+<https://github.com/xxxvik-xakerxxx/nothing-tetris-pmaports/blob/main/docs/INSTALL.md>`_
+for firmware prerequisites, image-to-partition mapping and recovery limitations.
+This experimental project is provided as-is, without warranty. Flashing can
+erase data or brick the phone. To the extent permitted by applicable law,
+the maintainer and contributors accept no responsibility or liability for
+device damage, bricking, data loss or recovery costs. Proceed at your own risk.
+
 Tetris has two 16 MiB LK partitions named ``lk_a`` and ``lk_b``. There is no
 partition or fastboot alias named ``lk``. For initial bring-up, keep one known
 working LK copy until the new image has booted and fastboot recovery has been
 validated.
 
-Install a validated image permanently by writing the same image to both LK
-partitions:
+The recorded sensor-ready profile was validated in slot A only. After
+independently confirming that exact firmware/profile and active slot, write
+only that slot and preserve the stock other copy:
 
 .. code-block:: bash
 
    $ fastboot flash lk_a u-boot-tetris-lk.img
-   $ fastboot flash lk_b u-boot-tetris-lk.img
-   $ fastboot reboot
 
-Do not interrupt either write. Keep a compatible stock LK image and the
-platform recovery procedure available before replacing both copies.
+Do not use this example for an unknown or slot-B setup, and do not overwrite
+both copies during initial bring-up. U-Boot's current-slot response is not
+independent evidence of the original boot slot. Verify the write before
+rebooting and keep compatible stock restore files and a tested recovery path.
+Preserving stock LK does not preserve bootable Android after Linux images
+overwrite ``super`` and ``userdata``. Do not flash raw ``u-boot.bin`` to LK.
+
+Ordinary builds leave secure SCP preparation disabled. The sensor diagnostic
+profile, exact firmware pins and cold-boot restrictions are documented in
+``tetris-scp-loader.rst``; a generic bootable loader is not sensor readiness.
 
 Boot flow and buttons
 ---------------------
