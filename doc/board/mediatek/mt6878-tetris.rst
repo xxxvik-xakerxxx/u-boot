@@ -53,6 +53,20 @@ rebooting and keep compatible stock restore files and a tested recovery path.
 Preserving stock LK does not preserve bootable Android after Linux images
 overwrite ``super`` and ``userdata``. Do not flash raw ``u-boot.bin`` to LK.
 
+After the selected image has booted Linux successfully and return to U-Boot
+fastboot has been verified, it may be installed to both LK slots if compatible
+with both slots' firmware/boot contexts:
+
+.. code-block:: bash
+
+   $ fastboot flash lk_a u-boot-tetris-lk.img
+   $ fastboot flash lk_b u-boot-tetris-lk.img
+
+Require each write to succeed. This removes both stock LK copies, so retain
+off-device backups and an independent recovery method. The experimental SCP
+profile is validated only for slot A: successful boot from A does not prove
+slot-B SCP compatibility. Keep B stock until that is established for the image.
+
 Ordinary builds leave secure SCP preparation disabled. The sensor diagnostic
 profile, exact firmware pins and cold-boot restrictions are documented in
 ``tetris-scp-loader.rst``; a generic bootable loader is not sensor readiness.
