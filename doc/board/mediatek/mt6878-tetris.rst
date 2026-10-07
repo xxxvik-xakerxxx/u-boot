@@ -238,9 +238,44 @@ records; the consumer structure is ``md_mem_blk`` in the pinned Nothing
 This is not a live physical allocation, and these sizes are not hard-coded.
 
 This map is deliberately **not** published as final ``md_mem_layout``.
-Stock then mutates flags/programs protection in ``0x27108`` (including platform
-callbacks through ``0x8196c``), invokes ``0xc200040b`` commands 1/2 from
+Stock then mutates flags/stages protection descriptors in ``0x27108`` (including
+platform callbacks through ``0x8196c``), invokes ``0xc200040b`` commands 1/2 from
 ``0x277f8``, and only then publishes the map at ``0x25ba4``. Their full secure
 contract, padding reclamation and shared-memory map remain unresolved. No
 protection call, memory release, firmware execution or modem DT activation is
 performed by the new planner. Padding flags alone never authorize releasing RAM.
+
+Bank-0 remap bounds
+~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_plan_remap()`` validates the complete caller-owned reservation
+against a supplied DRAM bank and calculates six masked register values. The
+audited ATF maps sixteen 32 MiB pages (512 MiB total), with ten physical page
+bits per entry. A nonzero, 32 MiB-aligned base, a reservation of at least
+512 MiB and a fully representable window below 32 GiB are required. Checking
+only the 480 MiB declared by the current ROM would leave the remapped tail
+unaccounted for. These checks do not prove exclusive ownership or configure
+MPU permissions. No SMC, MMIO, allocation or boot-path call is added.
+
+The exact installed ATF payload has SHA256
+``05a247cb02696ce4fe1982ea00bba81236c352146c307159d3f9e380635ea32e``;
+its 512-byte-header-plus-payload file instead hashes to
+``ee71f42fe4fa6b3e671ead5ca9c57995ba0631ebdb7b32509d0df3cda7f08287``.
+These identify the same input at different container boundaries, not two
+firmware versions. Payload offsets below refer only to this audited input.
+
+The SMC table at ``0x58bc8`` selects ``0xbe28`` for ``0xc200040b``. Commands
+1/2 reach ``0x1bbe0``/``0x1bcf0``; both reject bases outside the reported DRAM
+with ``-7``. They do not check alignment or the full window. The dispatcher
+can return ``-15`` after its lock is set. Command 1 returns zero and three
+register readbacks. Command 2 returns the shared third register in x0 and
+the remaining three in x1..x3: **nonzero x0 is not necessarily an error**.
+The future caller must reject negative errors and verify all masked fields,
+including the third register updated across both calls. The first five masks
+are ``0x3fffffff`` and the last is ``0x3ff``; unrelated bits are not compared.
+
+LK's ``0x8196c`` only stages rows (base, size, flags, ID, slot) in the table
+at ``0x198678``. Its downstream protection application still needs tracing;
+staging success must not be reported as an applied MPU policy. CI tests cover
+every representable aligned nonzero remap window, DRAM endpoints, undersized
+reservations, unaligned/overflowing addresses and unchanged output on errors.

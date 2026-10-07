@@ -186,3 +186,33 @@ int tetris_modem_plan_memory(const void *rom, size_t rom_size, size_t dsp_size,
 	*map = out;
 	return 0;
 }
+
+int tetris_modem_plan_remap(unsigned long long base,
+			    unsigned long long capacity,
+			    unsigned long long dram_base,
+			    unsigned long long dram_size,
+			    struct tetris_modem_remap *remap)
+{
+	struct tetris_modem_remap out = { 0 };
+	const unsigned long long window = 1ULL << 29;
+	unsigned int i;
+
+	if (!remap || !base || (base & ((1ULL << 25) - 1)) ||
+	    capacity < window || !dram_size ||
+	    dram_base > ~0ULL - dram_size || base > ~0ULL - capacity)
+		return -EINVAL;
+	/* ATF truncates page addresses to ten bits and checks only the base. */
+	if (base > (1ULL << 35) - window || base < dram_base ||
+	    base - dram_base >= dram_size ||
+	    capacity > dram_size - (base - dram_base))
+		return -ERANGE;
+	for (i = 0; i < 16; i++) {
+		unsigned int shift = (i % 3) * 10;
+		unsigned int page = (base >> 25) + i;
+
+		out.value[i / 3] |= page << shift;
+		out.mask[i / 3] |= 0x3ffU << shift;
+	}
+	*remap = out;
+	return 0;
+}

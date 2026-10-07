@@ -36,6 +36,58 @@ memory.argtypes = [c.c_void_p, c.c_size_t, c.c_size_t, c.c_ulonglong,
 memory.restype = c.c_int
 
 
+class Remap(c.Structure):
+    _fields_ = [("value", c.c_uint * 6), ("mask", c.c_uint * 6)]
+
+
+remap = library.tetris_modem_plan_remap
+remap.argtypes = [c.c_ulonglong] * 4 + [c.POINTER(Remap)]
+remap.restype = c.c_int
+
+
+class RemapTest(unittest.TestCase):
+    def call(self, base=0x80000000, capacity=0x20000000,
+             dram_base=0x40000000, dram_size=0x100000000):
+        out = Remap()
+        c.memset(c.byref(out), 0xa5, c.sizeof(out))
+        before = bytes(out)
+        ret = remap(base, capacity, dram_base, dram_size, c.byref(out))
+        if ret:
+            self.assertEqual(bytes(out), before)
+        return ret, out
+
+    def test_all_representable_windows(self):
+        for page in range(1, 1024 - 15):
+            ret, out = self.call(base=page << 25, dram_base=0, dram_size=1 << 35)
+            self.assertEqual(ret, 0)
+            self.assertEqual(list(out.mask), [0x3fffffff] * 5 + [0x3ff])
+            for index in range(16):
+                decoded = (out.value[index // 3] >> (index % 3 * 10)) & 0x3ff
+                self.assertEqual(decoded << 25, (page + index) << 25)
+            for value, mask in zip(out.value, out.mask):
+                self.assertEqual(value & ~mask, 0)
+
+    def test_whole_window_and_reservation_must_fit(self):
+        cases = (
+            dict(base=0), dict(base=0x80000001), dict(base=0x81000000),
+            dict(capacity=0), dict(capacity=0x1e000000),
+            dict(base=(1 << 35) - 0x1e000000, dram_base=0, dram_size=1 << 36),
+            dict(base=1 << 35, dram_base=0, dram_size=1 << 36),
+            dict(base=0x3e000000), dict(base=0x140000000),
+            dict(base=0x122000000), dict(dram_size=0),
+            dict(dram_base=(1 << 64) - 16, dram_size=32),
+            dict(capacity=(1 << 64) - 1), dict(capacity=0xc0000001),
+        )
+        for kwargs in cases:
+            with self.subTest(**kwargs):
+                self.assertNotEqual(self.call(**kwargs)[0], 0)
+        self.assertEqual(self.call(base=0x120000000)[0], 0)
+        self.assertEqual(self.call(base=0x40000000)[0], 0)
+        self.assertEqual(self.call(capacity=0xc0000000)[0], 0)
+        self.assertNotEqual(remap(0x80000000, 0x20000000,
+                                  0x40000000, 0x100000000, None), 0)
+
+
 class LayoutTest(unittest.TestCase):
     def fixture(self):
         rom = bytearray(1024)

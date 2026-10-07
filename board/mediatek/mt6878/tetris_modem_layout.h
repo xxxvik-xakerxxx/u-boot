@@ -29,6 +29,11 @@ struct tetris_modem_memory_map {
 	struct tetris_modem_block blocks[TETRIS_MODEM_MAX_BLOCKS];
 };
 
+struct tetris_modem_remap {
+	unsigned int value[6];
+	unsigned int mask[6];
+};
+
 /*
  * Relative load plan only: caller must authenticate both immutable images,
  * establish device/rollback policy and exclusively reserve the supplied
@@ -51,5 +56,17 @@ int tetris_modem_plan_layout(const void *rom, size_t rom_size, size_t dsp_size,
 int tetris_modem_plan_memory(const void *rom, size_t rom_size, size_t dsp_size,
 			     unsigned long long base, size_t capacity,
 			     struct tetris_modem_memory_map *map);
+
+/*
+ * Expected bank-0 remap fields for the audited ATF profile: sixteen 32 MiB
+ * pages, ten physical page bits each. Validate the whole owned reservation
+ * against one caller-supplied DRAM bank. Bounds do not establish ownership.
+ * No SMC/MMIO or protection changes. Output is unchanged on failure.
+ */
+int tetris_modem_plan_remap(unsigned long long base,
+			    unsigned long long capacity,
+			    unsigned long long dram_base,
+			    unsigned long long dram_size,
+			    struct tetris_modem_remap *remap);
 
 #endif
