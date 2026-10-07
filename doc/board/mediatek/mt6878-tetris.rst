@@ -107,3 +107,28 @@ publishes ``nothing,scp-a-container-status`` and
 ``nothing,scp-b-container-status`` plus the bounded container sizes under
 ``/chosen``. This is identity and layout observation only: certificates are
 not authenticated and no payload is copied, decrypted or executed.
+
+Modem handoff compatibility
+--------------------------
+
+The CCCI observer accepts the legacy 16-byte descriptor, the existing 32-byte
+descriptor, and exactly 48 bytes for version 3 with a zero-filled 16-byte
+extension. All prefix errors, tag bounds and reserved-memory checks still
+apply. Unknown nonzero extension state is rejected before mapping tag memory;
+it is not treated as harmless padding.
+
+This follows the B4.1 LK payload SHA256
+``431e0551382e21f4edfb8ff3ca05cd67b177d40b1a51f9e863965eea58f8b94a``:
+payload offsets ``0x28120..0x28138`` publish 48 raw bytes, while initializer
+``0x27df8..0x27dfc`` establishes zeros for only 12 of the extension bytes.
+The remaining four bytes and nonzero extension semantics are not established.
+The bounded producer audit is recorded in the `pmOS stock-container research
+<https://github.com/xxxvik-xakerxxx/nothing-tetris-pmaports/blob/af89204/patches/modem-stock-audit/REAL-CONTAINER.md>`_.
+
+CI exercises the real observer with a synthetic valid 48-byte handoff and
+rejects each nonzero extension byte, noncanonical lengths, incompatible
+versions and both prefix error fields. This is parser compatibility, not a
+modem loader: the current LK-replacement boot path still reports ``no-fdt``.
+Authenticated firmware loading, memory ownership and Linux CCCI publication
+remain prerequisites before SIM or calls can work. No modem SMC, partition
+write, DT consumer activation or SCP/display path is changed by this support.

@@ -864,6 +864,65 @@ static void test_gnss_emi_handoff(void)
 		"GPS EMI cells encode the board constant");
 }
 
+static void stock_descriptor(struct fixture *fixture, const u8 *raw, int len)
+{
+	require(!fdt_setprop(fixture->fdt, modem_node(fixture),
+			     "ccci,modem_info_v2", raw, len),
+		"set stock descriptor");
+	fixture->map_calls = 0;
+	fixture->unmap_calls = 0;
+}
+
+static void test_stock_v3_descriptor(void)
+{
+	struct fixture fixture;
+	u8 raw[64] = { 0 };
+	const void *prefix;
+	int len, ret, i;
+
+	fixture_init(&fixture, true, false);
+	prefix = fdt_getprop(fixture.fdt, modem_node(&fixture),
+			     "ccci,modem_info_v2", &len);
+	require(prefix && len == 32, "stock fixture prefix");
+	memcpy(raw, prefix, 32);
+	put_le32(raw + 16, 3);
+	stock_descriptor(&fixture, raw, 48);
+	require(observe(&fixture, &ret) == TETRIS_CCCI_OK && !ret,
+		"stock v3 zero-tail descriptor");
+
+	for (i = 32; i < 48; i++) {
+		raw[i] = 1;
+		stock_descriptor(&fixture, raw, 48);
+		expect_failure(&fixture, TETRIS_CCCI_BAD_DESCRIPTOR_STATUS,
+			       false, "nonzero stock extension before mapping");
+		raw[i] = 0;
+	}
+	for (i = 0; i <= (int)sizeof(raw); i++) {
+		if (i == 32 || i == 48)
+			continue;
+		stock_descriptor(&fixture, raw, i);
+		expect_failure(&fixture, TETRIS_CCCI_BAD_DESCRIPTOR_SIZE,
+			       false, "noncanonical stock descriptor size");
+	}
+	for (i = 0; i <= 4; i++) {
+		if (i == 3)
+			continue;
+		put_le32(raw + 16, i);
+		stock_descriptor(&fixture, raw, 48);
+		expect_failure(&fixture,
+			       TETRIS_CCCI_UNSUPPORTED_DESCRIPTOR_VERSION,
+			       false, "stock extension requires version three");
+	}
+	put_le32(raw + 16, 3);
+	for (i = 12; i <= 28; i += 16) {
+		put_le32(raw + i, 1);
+		stock_descriptor(&fixture, raw, 48);
+		expect_failure(&fixture, TETRIS_CCCI_BAD_DESCRIPTOR_STATUS,
+			       false, "stock prefix error preserved");
+		put_le32(raw + i, 0);
+	}
+}
+
 int main(void)
 {
 	test_valid(true, false);
@@ -871,6 +930,7 @@ int main(void)
 	test_valid(false, false);
 	test_valid_v5();
 	test_valid_v3_descriptor();
+	test_stock_v3_descriptor();
 	test_descriptor_failures();
 	test_invalid_status();
 	test_payload_failures();
