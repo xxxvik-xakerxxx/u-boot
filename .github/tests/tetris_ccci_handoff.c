@@ -3,6 +3,7 @@
 
 #define TETRIS_CCCI_HANDOFF_HOST_TEST
 #include "../../board/mediatek/mt6878/mt6878_tetris.c"
+#include "../../board/mediatek/mt6878/tetris_modem_layout.h"
 
 #define TEST_FDT_SIZE	16384
 #define TEST_TAG_SIZE	2048
@@ -923,6 +924,29 @@ static void test_stock_v3_descriptor(void)
 	}
 }
 
+static void test_encoded_memory_layout(void)
+{
+	struct fixture fixture;
+	struct tetris_modem_memory_map map = { .count = 2 };
+	u8 *payload;
+	u32 size;
+	int ret;
+
+	fixture_init(&fixture, true, false);
+	map.blocks[0].size = TEST_MD_SIZE / 2;
+	map.blocks[0].physical = TEST_MD_BASE;
+	map.blocks[1].offset = TEST_MD_SIZE / 2;
+	map.blocks[1].size = TEST_MD_SIZE / 2;
+	map.blocks[1].physical = TEST_MD_BASE + TEST_MD_SIZE / 2;
+	payload = fixture_tag_data(&fixture, "md_mem_layout", &size);
+	require(payload && size == 48, "encoded map fixture size");
+	ret = tetris_modem_encode_memory(&map, TEST_MD_BASE, TEST_MD_SIZE,
+					payload, size);
+	require(ret == 48, "encode two CCCI memory entries");
+	require(observe(&fixture, &ret) == TETRIS_CCCI_OK && !ret,
+		"real handoff validator accepts encoded memory map");
+}
+
 int main(void)
 {
 	test_valid(true, false);
@@ -931,6 +955,7 @@ int main(void)
 	test_valid_v5();
 	test_valid_v3_descriptor();
 	test_stock_v3_descriptor();
+	test_encoded_memory_layout();
 	test_descriptor_failures();
 	test_invalid_status();
 	test_payload_failures();

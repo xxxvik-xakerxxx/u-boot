@@ -35,6 +35,11 @@ memory.argtypes = [c.c_void_p, c.c_size_t, c.c_size_t, c.c_ulonglong,
                    c.c_size_t, c.POINTER(MemoryMap)]
 memory.restype = c.c_int
 
+encode_memory = library.tetris_modem_encode_memory
+encode_memory.argtypes = [c.POINTER(MemoryMap), c.c_ulonglong, c.c_size_t,
+                          c.c_void_p, c.c_size_t]
+encode_memory.restype = c.c_int
+
 
 class Remap(c.Structure):
     _fields_ = [("value", c.c_uint * 6), ("mask", c.c_uint * 6)]
@@ -249,6 +254,43 @@ class MemoryMapTest(unittest.TestCase):
                           (0x4000, 0x4000, 0, 0)])
         self.assertEqual(self.call(base=0x120000000)[0], 0)
         self.assertEqual(self.call(capacity=0x4000)[0], 0)
+
+    def test_ccci_encoding_matches_wire_format(self):
+        for base in (0x50000000, 0x120000000):
+            ret, mapped = self.call(base=base)
+            self.assertEqual(ret, 0)
+            expected = b"".join(struct.pack("<IIIIQ", b.offset, b.size,
+                                           b.info, b.attributes, b.physical)
+                                 for b in mapped.blocks[:mapped.count])
+            arena = c.create_string_buffer(b"\xa5" * (len(expected) + 32))
+            ret = encode_memory(c.byref(mapped), base, 0x8000,
+                                c.addressof(arena) + 16, len(expected))
+            self.assertEqual(ret, len(expected))
+            self.assertEqual(arena.raw, b"\xa5" * 16 + expected + b"\xa5" * 16 + b"\0")
+            # A caller may reuse the map's storage once validation finishes.
+            self.assertEqual(encode_memory(c.byref(mapped), base, 0x8000,
+                                           c.byref(mapped), c.sizeof(mapped)), len(expected))
+            self.assertEqual(bytes(mapped)[:len(expected)], expected)
+
+    def test_ccci_encoding_failure_preserves_output(self):
+        for field, value in (("offset", 1), ("size", 0), ("size", 0xffffffff),
+                             ("physical", 0x50000001)):
+            for index in (0, 4):
+                _, mapped = self.call()
+                setattr(mapped.blocks[index], field, value)
+                out = c.create_string_buffer(b"\xa5" * 768)
+                before = out.raw
+                self.assertLess(encode_memory(c.byref(mapped), 0x50000000,
+                                              0x8000, out, 768), 0)
+                self.assertEqual(out.raw, before)
+        for count, size in ((0, 768), (33, 768), (4, 768), (5, 119)):
+            _, mapped = self.call()
+            mapped.count = count
+            out = c.create_string_buffer(b"\xa5" * 768)
+            before = out.raw
+            self.assertLess(encode_memory(c.byref(mapped), 0x50000000,
+                                          0x8000, out, size), 0)
+            self.assertEqual(out.raw, before)
 
     def test_bad_base_and_capacity(self):
         for base, capacity in ((0, 0x8000), (2**64 - 0x4000, 0x8000),

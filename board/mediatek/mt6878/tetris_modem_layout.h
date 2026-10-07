@@ -15,6 +15,7 @@ struct tetris_modem_layout {
 };
 
 #define TETRIS_MODEM_MAX_BLOCKS 32
+#define TETRIS_MODEM_CCCI_BLOCK_SIZE 24
 
 struct tetris_modem_block {
 	unsigned int offset;
@@ -64,6 +65,15 @@ int tetris_modem_plan_layout(const void *rom, size_t rom_size, size_t dsp_size,
 int tetris_modem_plan_memory(const void *rom, size_t rom_size, size_t dsp_size,
 			     unsigned long long base, size_t capacity,
 			     struct tetris_modem_memory_map *map);
+
+/*
+ * Encode the complete planned reservation as little-endian CCCI md_mem_layout
+ * entries, not a native C struct dump. Return byte count or negative errno.
+ * Validate contiguous coverage and physical addresses before any output write.
+ * Does not publish tags, grant memory permissions or assert modem readiness.
+ */
+int tetris_modem_encode_memory(const struct tetris_modem_memory_map *map,
+		unsigned long long base, size_t capacity, void *buffer, size_t size);
 
 /*
  * Expected bank-0 remap fields for the audited ATF profile: sixteen 32 MiB

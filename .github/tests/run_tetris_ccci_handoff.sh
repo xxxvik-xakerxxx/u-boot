@@ -10,8 +10,10 @@ trap 'rm -f "$binary"' EXIT HUP INT TERM
 cd "$root"
 "${HOSTCC:-cc}" \
 	-std=gnu11 -Wall -Wextra -Werror \
+	-DTETRIS_MODEM_LAYOUT_HOST_TEST \
 	-Iscripts/dtc/libfdt \
 	.github/tests/tetris_ccci_handoff.c \
+	board/mediatek/mt6878/tetris_modem_layout.c \
 	scripts/dtc/libfdt/fdt.c \
 	scripts/dtc/libfdt/fdt_addresses.c \
 	scripts/dtc/libfdt/fdt_empty_tree.c \

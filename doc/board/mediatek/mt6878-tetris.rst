@@ -331,6 +331,30 @@ Native CI tests cover rounded ranges at several line sizes, addresses above
 Results for the cache addition are pending CI. The slot loader remains
 unwired to automatic boot; secure protection and reset handoff are outstanding.
 
+CCCI memory-map encoding
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_encode_memory()`` now serializes the planned reservation into
+the exact little-endian, 24-byte ``md_mem_layout`` entries expected by the
+Nothing B4.1 kernel's ``ccci_util_md_mem.c`` (device modules commit
+``ee2be53cb75670b548948636a0db1d1ff112bf12``). Fields are offset, size,
+information flags, attribute flags and the 64-bit AP physical address.
+Native struct padding is never copied into the wire format.
+
+The encoder checks count, complete contiguous coverage, each physical address,
+reservation overflow and output capacity before writing any output. It
+preserves planner flags, including unused reservation tails; these flags are
+not evidence that an MPU policy has been applied. Addresses come from the
+caller-owned reservation, including allocations above 4 GiB, not a handset
+constant. The maximum serialized table is 768 bytes, below the vendor
+consumer's 1024-byte buffer.
+
+CI tests compare every byte, check guards and rejected malformed maps, and
+feed an encoded table into the existing real CCCI handoff validator. Results
+for this addition are pending. No DT tag descriptor, readiness marker or
+modem consumer is enabled: the complete shared-memory layout and secure
+protection/reset handoff are still required before publication to Linux.
+
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

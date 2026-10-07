@@ -187,6 +187,50 @@ int tetris_modem_plan_memory(const void *rom, size_t rom_size, size_t dsp_size,
 	return 0;
 }
 
+static void put_word(unsigned char *p, unsigned int value)
+{
+	p[0] = value;
+	p[1] = value >> 8;
+	p[2] = value >> 16;
+	p[3] = value >> 24;
+}
+
+int tetris_modem_encode_memory(const struct tetris_modem_memory_map *map,
+		unsigned long long base, size_t capacity, void *buffer, size_t size)
+{
+	unsigned char encoded[TETRIS_MODEM_MAX_BLOCKS * TETRIS_MODEM_CCCI_BLOCK_SIZE];
+	size_t bytes, offset = 0;
+	unsigned int i;
+
+	if (!map || !buffer || !base || !capacity || capacity > 0xffffffffU ||
+	    base > ~0ULL - capacity || !map->count ||
+	    map->count > TETRIS_MODEM_MAX_BLOCKS)
+		return -EINVAL;
+	bytes = map->count * TETRIS_MODEM_CCCI_BLOCK_SIZE;
+	if (size < bytes)
+		return -ENOSPC;
+	for (i = 0; i < map->count; i++) {
+		const struct tetris_modem_block *block = &map->blocks[i];
+		unsigned char *entry = encoded + i * TETRIS_MODEM_CCCI_BLOCK_SIZE;
+
+		if (block->offset != offset || !block->size ||
+		    block->size > capacity - offset || block->physical != base + offset)
+			return -ERANGE;
+		put_word(entry, block->offset);
+		put_word(entry + 4, block->size);
+		put_word(entry + 8, block->info);
+		put_word(entry + 12, block->attributes);
+		put_word(entry + 16, block->physical);
+		put_word(entry + 20, block->physical >> 32);
+		offset += block->size;
+	}
+	if (offset != capacity)
+		return -ERANGE;
+	/* Staging also permits buffer to alias map without corrupting later entries. */
+	memcpy(buffer, encoded, bytes);
+	return bytes;
+}
+
 int tetris_modem_plan_remap(unsigned long long base,
 			    unsigned long long capacity,
 			    unsigned long long dram_base,
