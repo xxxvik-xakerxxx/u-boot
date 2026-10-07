@@ -312,6 +312,37 @@ ownership, an exclusive reservation and the complete EMI policy must be
 established. Verified address remapping is not modem boot, safe DMA or a CCCI
 handoff; no hardware call or new SIM functionality is enabled by this change.
 
+Optional modem RAM reservation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``CONFIG_TETRIS_MODEM_RESERVE_DIAGNOSTIC`` is disabled by default. Explicit
+CI input ``modem_reserve=true`` enables a RAM-only experiment, independently
+of the SCP inputs. It does not load modem firmware, issue SMC/MMIO operations,
+publish CCCI-ready tags, or enable a modem driver. This is not SIM support.
+
+After Linux image placement and existing SCP/conninfra preparation, the board
+asks the global LMB allocator for a free 512 MiB window, aligned to 32 MiB,
+below 32 GiB and wholly inside one detected DRAM bank. Existing fragmentary
+``mediatek,md_mem_usage`` reservations are not promoted to ownership of the
+gaps between them. No handset-specific base address is used.
+
+Publication checks the outgoing tree's two-cell identity address layout,
+all static reserved-memory tuples and the memreserve table. It rejects
+overlaps, malformed ranges and duplicate diagnostics. Changes are made in a
+private DT copy: the no-map node and memreserve entry are committed together.
+On failure the original DT is unchanged and the allocation is released; a
+release error is logged. Linux boot continues without a modem reservation.
+No memory contents are touched. A successful experiment removes 512 MiB
+from Linux's usable RAM until the next boot.
+
+Native libfdt tests cover allocation failures, address bounds, existing
+reservations, duplicates and every FDT slack size from 0 to 255 bytes.
+CI also cross-compiles the enabled board path. Hardware validation is still
+pending: verify the Linux carveout, USB/SSH and existing sensors/display
+before connecting any firmware loader or secure-monitor transport. For the
+currently installed sensor stack, retain all three explicit SCP CI inputs;
+the ordinary default CI artifact is not its replacement.
+
 One-shot EMI range encoding
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -16,3 +16,15 @@ assert "states & (BOOTM_STATE_RAMDISK | BOOTM_STATE_FDT)" in body[:reserve_at]
 assert "!ret && images->ft_addr" in body[:reserve_at], "DT-less boots must skip reservation"
 assert "CONFIG_IS_ENABLED(OF_LIBFDT) && CONFIG_IS_ENABLED(LMB)" in body[:reserve_at]
 print("bootm reservation order: PASS (source guard, not hardware validation)")
+
+root = Path(__file__).resolve().parents[2]
+arm = (root / "arch/arm/lib/bootm.c").read_text()
+prep = arm[arm.index("static void boot_prep_linux("):]
+assert prep.index("image_setup_linux(images)") < prep.index("board_prep_linux(images)")
+board = (root / "board/mediatek/mt6878/mt6878_tetris.c").read_text()
+prep = board[board.index("void board_prep_linux("):board.index("static int tetris_boot_pmos(")]
+reserve_at = prep.index("tetris_modem_reserve_diagnostic(fdt)")
+assert prep.index("tetris_scp_prepare_diagnostic(images, fdt)") < reserve_at
+assert prep.index("tetris_prepare_connsys_emi(fdt)") < reserve_at
+assert "IS_ENABLED(CONFIG_TETRIS_MODEM_RESERVE_DIAGNOSTIC)" in prep[:reserve_at]
+print("modem RAM diagnostic order: PASS (after Linux and firmware placement)")

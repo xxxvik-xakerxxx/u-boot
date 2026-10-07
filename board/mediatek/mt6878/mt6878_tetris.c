@@ -59,6 +59,7 @@ static u64 tetris_test_get_le64(const void *ptr)
 
 #include "tetris_scp_handoff.h"
 #include "tetris_scp_security.h"
+#include "tetris_modem_reserve.h"
 #endif
 
 #define TETRIS_CCCI_MAX_INFO_SIZE	0x10000U
@@ -1670,10 +1671,13 @@ void board_prep_linux(struct bootm_headers *images)
 
 	/* Observation only: validation failure must not alter the boot path. */
 	tetris_observe_ccci_handoff(fdt);
-
 	ret = tetris_prepare_connsys_emi(fdt);
 	if (ret)
 		panic("Tetris: refusing Linux boot without conninfra EMI mapping\n");
+	if (IS_ENABLED(CONFIG_TETRIS_MODEM_RESERVE_DIAGNOSTIC)) {
+		ret = tetris_modem_reserve_diagnostic(fdt);
+		printf("Tetris modem RAM diagnostic: %d (modem not started)\n", ret);
+	}
 }
 
 static int tetris_boot_pmos(const char *extra_bootargs)
