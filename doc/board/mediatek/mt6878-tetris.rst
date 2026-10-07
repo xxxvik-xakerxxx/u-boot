@@ -170,6 +170,34 @@ CHECK_HEADER/memory layout, reservations, and ATF modem reset/protection
 ownership. A valid signature alone must not enable a modem DT node or publish
 a successful CCCI handoff.
 
+Authenticated modem bundle preflight
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_authenticate_bundle()`` connects container parsing, the native
+certificate verifier and signed ROM layout validation. One caller-owned,
+immutable snapshot is scanned for adjacent ``md1rom/cert1md/cert2``,
+``md1drdi/cert1/cert2`` and ``md1dsp/cert1/cert2`` groups. The independently
+provided root pin applies to every group, including DRDI even though the
+supported mode-3 layout does not copy it. Duplicate selected components,
+missing adjacent certificates, malformed headers, unsupported alignment,
+oversized payloads/certificates and truncated padding fail closed.
+
+The parser is bounded to 256 MiB and 128 member headers. It stops after all
+three selected groups; ``consumed`` identifies that boundary, not a claim
+that the rest of the partition is authenticated. Only after all signatures
+and the signed CHECK_HEADER layout pass does it publish fixed-order member
+offsets and the ROM/DSP plan. Errors leave the output unchanged. Synthetic
+CI tests sign actual member headers and exercise reordered groups, corrupted
+signed fields, wrong trust pins, authenticated but invalid layouts, duplicate
+groups, truncations and the exact scan-budget boundary.
+
+This is a loader preflight, not the device loader: it neither reads partitions
+nor allocates or writes destination RAM, and no boot caller is installed.
+The snapshot must remain immutable through subsequent copying. Device root
+provenance, active slot/SKU, rollback and cross-component version policy,
+memory/reset ownership and complete protection remain execution gates.
+Successful preflight must not publish CCCI-ready state or release modem reset.
+
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

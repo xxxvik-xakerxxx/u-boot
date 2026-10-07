@@ -20,7 +20,8 @@ cc=${HOSTCC:-cc}
     -I"$work/include" -I"$root/.github/tests/asn1-host" -I"$work" \
     "$root/lib/asn1_decoder.c" "$work/tetris_scp_fields.asn1.c" \
     "$board/tetris_scp_security.c" "$board/tetris_scp_crypto.c" \
-    "$board/tetris_modem_layout.c" "$board/tetris_modem_remap.c" -o "$work/security.so"
+    "$board/tetris_modem_layout.c" "$board/tetris_modem_remap.c" \
+    "$board/tetris_modem_bundle.c" -o "$work/security.so"
 "${PYTHON:-python3}" "$root/.github/tests/test_tetris_scp_security_c.py" "$work/security.so"
 "${PYTHON:-python3}" "$root/.github/tests/test_tetris_modem_security.py" "$work/security.so"
 "${PYTHON:-python3}" "$root/.github/tests/test_tetris_modem_layout.py" "$work/security.so"
