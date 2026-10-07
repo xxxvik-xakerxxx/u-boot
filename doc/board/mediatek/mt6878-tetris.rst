@@ -224,13 +224,40 @@ partial, untrusted data and must not be used after failure.
 The caller must supply exclusive staging RAM large enough for the partition;
 this is not the modem destination reservation, and no heap allocation is
 hidden in the reader. The observed 200 MiB partition cannot fit in Tetris's
-32 MiB malloc arena; a separate owned LMB staging allocation is required.
-Full-snapshot memory budgeting is still needed before
+32 MiB malloc arena; the scoped LMB staging helper below avoids that arena.
+Availability of a contiguous allocation still needs device validation before
 boot integration. The buffer must remain immutable after authentication.
 Native tests exercise both block sizes, exact chunk addresses, short reads at
 every chunk, corrupt payloads, wrong root pins and out-of-range geometry.
 CI cross-compiles the actual GPT/block adapter. No automatic boot caller,
 partition writes, modem RAM copy, SMC or CCCI-ready publication is enabled.
+
+Scoped staging diagnostic
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_stage_slot()`` combines the explicit-slot reader with a
+temporary exclusive LMB allocation sized from the validated partition extent,
+aligned to 64 KiB. The adapter uses ARM64's direct ``map_sysmem`` mapping,
+not a 200 MiB heap allocation. It must only be called after kernel, initrd,
+DT and existing firmware reservations have entered LMB. The existing UFS
+PRDT preparation carries both low and high address words; no handset base
+address or artificial 32-bit physical pointer truncation is introduced.
+
+``tetris_modem_stage_bundle()`` owns the acquire/read/authenticate/release
+lifetime. Invalid arguments or partition geometry cause no allocation.
+After a successful acquisition, release is attempted exactly once, even
+when reading or authentication fails. An earlier operation error takes
+precedence over a release error; the production release adapter logs its
+own failure. No success output is published if release fails.
+
+Only a pointer-free layout is returned, after release. No payload pointer,
+container offset or executable image survives this diagnostic API; it is
+deliberately not a copy-to-modem path. The temporary allocation is not added
+to Linux reserved-memory, and the separate 512 MiB modem window is untouched.
+No boot caller, root pin or slot inference is enabled by this helper. Native
+tests invalidate the snapshot during release and check success, failed
+allocation, null allocator output, short reads at every chunk, authentication
+failure, failed release and preservation of the first failure.
 
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -15,8 +15,15 @@ import tetris_modem_security as modem
 native = None
 bundle_native = None
 storage_native = None
+stage_native = None
 ReadBlocks = c.CFUNCTYPE(c.c_ulonglong, c.c_void_p, c.c_ulonglong,
                         c.c_ulonglong, c.c_void_p)
+Acquire = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_size_t, c.POINTER(c.c_void_p))
+Release = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_void_p, c.c_size_t)
+
+
+class StagingOps(c.Structure):
+    _fields_ = [("acquire", Acquire), ("release", Release), ("ctx", c.c_void_p)]
 
 
 class Storage(c.Structure):
@@ -77,6 +84,11 @@ if len(sys.argv) > 1 and sys.argv[1].endswith(".so"):
                                c.c_void_p, c.POINTER(Ops), c.c_size_t,
                                c.POINTER(Bundle)]
     storage_native.restype = c.c_int
+    stage_native = library.tetris_modem_stage_bundle
+    stage_native.argtypes = [c.POINTER(Storage), c.POINTER(StagingOps),
+                             c.c_void_p, c.POINTER(Ops), c.c_size_t,
+                             c.POINTER(Layout)]
+    stage_native.restype = c.c_int
 
 
 class ModemSecurityTest(unittest.TestCase):
@@ -188,14 +200,16 @@ class ModemSecurityTest(unittest.TestCase):
             self.assertTrue(self.accepted(parts))
 
     def storage_call(self, data, block_size=512, fail_at=None, changes=None,
-                     capacity=None, wrong_pin=False):
+                     capacity=None, wrong_pin=False, staging=None):
         data += bytes((-len(data)) % block_size)
         calls = []
         violations = []
+        events = []
         start = 17
 
         @ReadBlocks
         def read(ctx, block, count, output):
+            events.append("read")
             calls.append((block, count))
             offset = (block - start) * block_size
             length = count * block_size
@@ -212,19 +226,83 @@ class ModemSecurityTest(unittest.TestCase):
         for name, value in (changes or {}).items():
             setattr(storage, name, value)
         buffer = c.create_string_buffer(len(data))
-        out = Bundle()
+        out = Bundle() if staging is None else Layout()
         c.memset(c.byref(out), 0xa5, c.sizeof(out))
         before = bytes(out)
         pin = bytes(32) if wrong_pin else bytes.fromhex(self.fixture.root_pin)
-        ret = storage_native(c.byref(storage), buffer,
-                             len(data) if capacity is None else capacity,
-                             pin, c.byref(ops), 0x4000, c.byref(out))
+        if staging is None:
+            ret = storage_native(c.byref(storage), buffer,
+                                 len(data) if capacity is None else capacity,
+                                 pin, c.byref(ops), 0x4000, c.byref(out))
+        else:
+            @Acquire
+            def acquire(ctx, size, output):
+                events.append("acquire")
+                if ctx != 456 or size != len(data):
+                    violations.append("invalid allocation request")
+                    return -1
+                if staging.get("acquire_error"):
+                    return -12
+                output[0] = None if staging.get("null_buffer") else c.addressof(buffer)
+                return 0
+
+            @Release
+            def release(ctx, address, size):
+                events.append("release")
+                expected = None if staging.get("null_buffer") else c.addressof(buffer)
+                if ctx != 456 or address != expected or size != len(data):
+                    violations.append("invalid release")
+                c.memset(buffer, 0xdd, len(data))  # Invalidate the entire snapshot.
+                return -16 if staging.get("release_error") else 0
+
+            memory = StagingOps(acquire, release, 456)
+            ret = stage_native(c.byref(storage), c.byref(memory), pin,
+                               c.byref(ops), 0x4000, c.byref(out))
+            if changes:
+                self.assertEqual(events, [], "invalid geometry must not allocate")
+            if events:
+                self.assertEqual(events[0], "acquire")
+                self.assertEqual(events.count("acquire"), 1)
+                if staging.get("acquire_error"):
+                    self.assertEqual(events, ["acquire"])
+                else:
+                    self.assertEqual(events[-1], "release")
+                    self.assertEqual(events.count("release"), 1)
         self.assertFalse(violations, "reader escaped the partition")
         if ret:
             self.assertEqual(bytes(out), before)
-        else:
+        elif staging is None:
             self.assertEqual(buffer.raw, data)
+        else:
+            self.assertEqual(out.rom_size, 1024)
+            self.assertEqual(out.dsp_offset, 0x3000)
         return ret, calls
+
+    @unittest.skipUnless(stage_native, "native staging executes only in CI")
+    def test_staging_lifetime_and_cleanup(self):
+        data = b"".join(self.signed_groups())
+        data += bytes(3 * 65536 - len(data))
+        for block_size in (512, 4096):
+            self.assertEqual(self.storage_call(data, block_size, staging={})[0], 0)
+            for failure in (1, 2, 3):
+                ret, calls = self.storage_call(data, block_size, fail_at=failure, staging={})
+                self.assertNotEqual(ret, 0)
+                self.assertEqual(len(calls), failure)
+        for staging in ({"acquire_error": True}, {"release_error": True},
+                        {"null_buffer": True}):
+            ret, calls = self.storage_call(data, staging=staging)
+            self.assertNotEqual(ret, 0)
+            if not staging.get("release_error"):
+                self.assertEqual(calls, [])
+        self.assertNotEqual(self.storage_call(data, wrong_pin=True, staging={})[0], 0)
+        for changes in ({"blocks": 0}, {"block_size": 0},
+                        {"device_blocks": 17}):
+            ret, calls = self.storage_call(data, changes=changes, staging={})
+            self.assertNotEqual(ret, 0)
+            self.assertEqual(calls, [])
+        first = self.storage_call(data, fail_at=1, staging={})[0]
+        both = self.storage_call(data, fail_at=1, staging={"release_error": True})[0]
+        self.assertEqual(first, both, "preserve the first I/O failure")
 
     @unittest.skipUnless(storage_native, "native storage executes only in CI")
     def test_storage_snapshot_then_authentication(self):

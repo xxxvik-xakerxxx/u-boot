@@ -27,6 +27,31 @@ int tetris_modem_read_bundle(const struct tetris_modem_storage *storage,
 		struct tetris_modem_bundle *bundle);
 
 struct blk_desc;
+struct tetris_modem_staging_ops {
+	/* Failure must leave no allocation; success transfers exclusive ownership. */
+	int (*acquire)(void *ctx, size_t size, void **buffer);
+	/* Called exactly once after successful acquire, including read failures. */
+	int (*release)(void *ctx, void *buffer, size_t size);
+	void *ctx;
+};
+
+/*
+ * Scoped diagnostic: allocate, read/authenticate, release, then publish a
+ * pointer-free layout. No payload survives for execution. Release failure
+ * suppresses output; an earlier read/authentication error takes precedence.
+ */
+int tetris_modem_stage_bundle(const struct tetris_modem_storage *storage,
+		const struct tetris_modem_staging_ops *memory,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops, size_t reserved_capacity,
+		struct tetris_modem_layout *layout);
+
+/* U-Boot LMB-backed staging; call only after image/firmware reservations. */
+int tetris_modem_stage_slot(struct blk_desc *dev, char slot,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops, size_t reserved_capacity,
+		struct tetris_modem_layout *layout);
+
 /* Explicit, externally established slot 'a' or 'b'; no fallback or inference. */
 int tetris_modem_read_slot(struct blk_desc *dev, char slot, void *buffer,
 		size_t capacity, const unsigned char root_pin[32],
