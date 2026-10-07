@@ -275,8 +275,9 @@ including the third register updated across both calls. The first five masks
 are ``0x3fffffff`` and the last is ``0x3ff``; unrelated bits are not compared.
 
 LK's ``0x8196c`` only stages rows (base, size, flags, ID, slot) in the table
-at ``0x198678``. Its downstream protection application still needs tracing;
-staging success must not be reported as an applied MPU policy. CI tests cover
+at ``0x198678``. The later ``0x81804`` loop applies them through ``0x7ef84``;
+the platform selector ``0x16ea0`` returns 2, selecting ``0x82000415`` command 0.
+Staging success must not be reported as an applied MPU policy. CI tests cover
 every representable aligned nonzero remap window, DRAM endpoints, undersized
 reservations, unaligned/overflowing addresses and unchanged output on errors.
 
@@ -304,3 +305,12 @@ from an address. Bounds and enabled-state readback do not prove permissions.
 Command 6 accepts only slot 40 and preset 0..3 for this ATF; other requests
 return ``-4``. Preset application, table ownership and the complete protection
 transaction remain separate prerequisites; no runtime boot caller is enabled.
+
+The pmOS repository's ``patches/modem/test-atf-emi-contract.py`` executes this
+pinned handler in Unicorn 2.1.4 with synthetic memory and emulated registers.
+64 scenarios pass, including exact writes, repeated-slot errors, raw readbacks,
+address truncation and the four allowed presets with zero/preexisting bits.
+The preset writer ORs rights into the selected readback, not a replacement
+policy; validating initial state is required. This is offline instruction
+evidence, not proof of hardware permission semantics. The private ATF image
+is hash-checked locally and is not distributed in CI.
