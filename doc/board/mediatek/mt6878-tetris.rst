@@ -300,14 +300,36 @@ An earlier read/authentication error takes precedence over cleanup failure.
 
 Unlike the placement primitive, this wrapper may return a release error after
 verified payload bytes were copied. Such a result must abort boot; destination
-contents alone are never evidence of successful loading. Neither function
-performs cache synchronization or grants execution permission.
+contents alone are never evidence of successful loading. The generic bundle
+loader does not synchronize caches; the production slot adapter now does so
+before publishing its layout. Neither function grants execution permission.
 
 New native tests cover 512/4096-byte storage, short reads at each chunk,
 allocation and release errors, null/overlapping/wrapping staging buffers,
 authentication failure and preservation of the first failure. The release
 mock destroys the snapshot and verifies copying happened before that point.
-Results for this new wrapper are pending CI.
+These loader tests and the ARM64 build passed CI 37661251154 at
+``b117a96d61``. No device execution was tested.
+
+Payload cache synchronization
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The slot loader now calls ``tetris_modem_sync_payloads()`` after successful
+copy and staging release, before publishing a successful layout. It validates
+both ranges first, rounds ROM and DSP extents to cache lines, and rejects
+unaligned destination ownership, overflow and invalid extents before any
+cache operation. Padding within those cache lines belongs to the reservation;
+the rest of the reservation is not flushed or initialized.
+
+The production adapter uses ARM64 ``flush_dcache_range()``, whose assembly
+implementation completes with ``dsb sy``. No instruction-cache invalidation
+on the AP is needed to hand data to a separate processor. This is not proof
+that EMI permissions or modem-side cache/reset state are correct.
+
+Native CI tests cover rounded ranges at several line sizes, addresses above
+4 GiB, invalid bounds and stopping at either injected callback failure.
+Results for the cache addition are pending CI. The slot loader remains
+unwired to automatic boot; secure protection and reset handoff are outstanding.
 
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~

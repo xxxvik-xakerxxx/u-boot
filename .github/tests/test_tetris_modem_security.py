@@ -18,6 +18,13 @@ storage_native = None
 stage_native = None
 place_native = None
 load_native = None
+sync_native = None
+Flush = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_ulong, c.c_ulong)
+
+
+class CacheOps(c.Structure):
+    _fields_ = [("flush", Flush), ("ctx", c.c_void_p)]
+
 ReadBlocks = c.CFUNCTYPE(c.c_ulonglong, c.c_void_p, c.c_ulonglong,
                         c.c_ulonglong, c.c_void_p)
 Acquire = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_size_t, c.POINTER(c.c_void_p))
@@ -101,6 +108,10 @@ if len(sys.argv) > 1 and sys.argv[1].endswith(".so"):
                             c.c_void_p, c.POINTER(Ops), c.c_void_p,
                             c.c_size_t, c.POINTER(Layout)]
     load_native.restype = c.c_int
+    sync_native = library.tetris_modem_sync_payloads
+    sync_native.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Layout),
+                            c.c_size_t, c.POINTER(CacheOps)]
+    sync_native.restype = c.c_int
 
 
 class ModemSecurityTest(unittest.TestCase):
@@ -210,6 +221,60 @@ class ModemSecurityTest(unittest.TestCase):
     def test_bundle_reference_signatures(self):
         for parts in modem.components(b"".join(self.signed_groups())).values():
             self.assertTrue(self.accepted(parts))
+
+    @unittest.skipUnless(sync_native, "native cache synchronization executes only in CI")
+    def test_cache_ranges_and_first_failure(self):
+        # Synthetic addresses; the callback never accesses hardware or memory.
+        base = 0x100000000
+        layout = Layout(0x4000, 0x2000, 1009, 0x3011, 0xfef, 255, 2)
+        for alignment in (64, 128, 256, 4096):
+            mask = alignment - 1
+            expected = [(base, base + ((1009 + mask) & ~mask)),
+                        (base + (0x3011 & ~mask),
+                         base + ((0x3011 + 255 + mask) & ~mask))]
+            for failure in (0, 1, 2):
+                calls = []
+
+                @Flush
+                def flush(ctx, start, end):
+                    calls.append((start, end))
+                    return -5 if len(calls) == failure else 0
+
+                cache = CacheOps(flush, None)
+                before = bytes(layout)
+                ret = sync_native(base, 0x4000, c.byref(layout), alignment,
+                                  c.byref(cache))
+                self.assertEqual(ret, -5 if failure else 0)
+                self.assertEqual(calls, expected[:failure] if failure else expected)
+                self.assertEqual(bytes(layout), before)
+
+    @unittest.skipUnless(sync_native, "native cache synchronization executes only in CI")
+    def test_invalid_cache_ranges_have_no_effect(self):
+        calls = []
+
+        @Flush
+        def flush(ctx, start, end):
+            calls.append((start, end))
+            return 0
+
+        cache = CacheOps(flush, None)
+        base = 0x100000000
+        cases = [(base, 0x4000, 0, {}), (base, 0x4000, 96, {}),
+                 (base + 1, 0x4000, 64, {}), (base, 0x3fff, 64, {}),
+                 (c.c_ulong(-64).value, 0x4000, 64, {}),
+                 (base, 0x4000, 64, {"memory_size": 0x4001}),
+                 (base, 0x4000, 64, {"rom_size": 0}),
+                 (base, 0x4000, 64, {"dsp_size": 0}),
+                 (base, 0x4000, 64, {"dsp_offset": 1}),
+                 (base, 0x4000, 64, {"dsp_capacity": 0x1001}),
+                 (base, 0x4000, 64, {"dsp_size": 0x1001})]
+        for address, capacity, alignment, changes in cases:
+            layout = Layout(0x4000, 0x2000, 1024, 0x3000, 0x1000, 256, 2)
+            for name, value in changes.items():
+                setattr(layout, name, value)
+            self.assertNotEqual(sync_native(address, capacity, c.byref(layout),
+                                            alignment, c.byref(cache)), 0)
+            self.assertEqual(calls, [])
 
     @unittest.skipUnless(place_native, "native payload placement executes only in CI")
     def test_place_authenticated_payloads(self):

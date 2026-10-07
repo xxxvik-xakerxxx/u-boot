@@ -260,12 +260,22 @@ int tetris_modem_stage_slot(struct blk_desc *dev, char slot,
 					reserved_capacity, layout);
 }
 
+static int flush_payload(void *ctx, unsigned long start, unsigned long end)
+{
+	(void)ctx;
+	/* ARM64 flush_dcache_range completes with dsb sy. */
+	flush_dcache_range(start, end);
+	return 0;
+}
+
 int tetris_modem_load_slot(struct blk_desc *dev, char slot,
 		const unsigned char root_pin[32],
 		const struct tetris_scp_security_ops *ops,
 		void *destination, size_t capacity,
 		struct tetris_modem_layout *layout)
 {
+	const struct tetris_modem_cache_ops cache = { .flush = flush_payload };
+	struct tetris_modem_layout loaded;
 	struct staging_allocation allocation = { 0 };
 	const struct tetris_modem_staging_ops memory = {
 		.acquire = acquire_staging,
@@ -275,10 +285,21 @@ int tetris_modem_load_slot(struct blk_desc *dev, char slot,
 	struct tetris_modem_storage storage;
 	int ret;
 
+	if (!layout || !separate(destination, capacity, layout, sizeof(*layout)) ||
+	    (((unsigned long)destination | capacity) & (ARCH_DMA_MINALIGN - 1)))
+		return -EINVAL;
 	ret = slot_storage(dev, slot, &storage);
 	if (ret)
 		return ret;
-	return tetris_modem_load_bundle(&storage, &memory, root_pin, ops,
-				       destination, capacity, layout);
+	ret = tetris_modem_load_bundle(&storage, &memory, root_pin, ops,
+				       destination, capacity, &loaded);
+	if (ret)
+		return ret;
+	ret = tetris_modem_sync_payloads(destination, capacity, &loaded,
+					ARCH_DMA_MINALIGN, &cache);
+	if (ret)
+		return ret;
+	*layout = loaded;
+	return 0;
 }
 #endif

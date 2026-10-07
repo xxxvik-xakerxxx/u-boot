@@ -166,3 +166,37 @@ int tetris_modem_place_bundle(const void *container, size_t size,
 	*layout = bundle.layout;
 	return 0;
 }
+
+int tetris_modem_sync_payloads(void *destination, size_t capacity,
+		const struct tetris_modem_layout *layout, size_t alignment,
+		const struct tetris_modem_cache_ops *ops)
+{
+	unsigned long base = (unsigned long)destination;
+	unsigned long start[2], end[2], mask;
+	int ret, i;
+
+	if (!valid_span(destination, capacity) || !layout || !ops || !ops->flush ||
+	    !alignment || (alignment & (alignment - 1)))
+		return -EINVAL;
+	mask = alignment - 1;
+	if ((base & mask) || (capacity & mask) || !layout->memory_size ||
+	    layout->memory_size > capacity || !layout->rom_size ||
+	    layout->rom_size > layout->memory_size || !layout->dsp_size ||
+	    layout->dsp_size > layout->dsp_capacity ||
+	    layout->dsp_offset < layout->rom_size ||
+	    layout->dsp_offset >= layout->memory_size ||
+	    layout->dsp_capacity > layout->memory_size - layout->dsp_offset)
+		return -ERANGE;
+	/* Aligned capacity bounds rounding without overflowing the address space. */
+	start[0] = base;
+	end[0] = base + (((layout->rom_size - 1UL) | mask) + 1);
+	start[1] = base + (layout->dsp_offset & ~mask);
+	end[1] = base + (((layout->dsp_offset +
+			  (unsigned long)layout->dsp_size - 1) | mask) + 1);
+	for (i = 0; i < 2; i++) {
+		ret = ops->flush(ops->ctx, start[i], end[i]);
+		if (ret)
+			return ret;
+	}
+	return 0;
+}

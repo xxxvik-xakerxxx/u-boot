@@ -52,4 +52,20 @@ int tetris_modem_place_bundle(const void *container, size_t size,
 		void *destination, size_t capacity,
 		struct tetris_modem_layout *layout);
 
+struct tetris_modem_cache_ops {
+	/* Clean to coherency and complete the barrier before returning success. */
+	int (*flush)(void *ctx, unsigned long start, unsigned long end);
+	void *ctx;
+};
+
+/*
+ * Synchronize a successfully loaded layout in exclusively owned RAM. Validate
+ * both rounded ranges before the first callback. No reset/SMC is performed.
+ * Destination and capacity must cover whole cache lines. A callback failure
+ * may follow earlier cache effects and must prevent firmware execution.
+ */
+int tetris_modem_sync_payloads(void *destination, size_t capacity,
+		const struct tetris_modem_layout *layout, size_t alignment,
+		const struct tetris_modem_cache_ops *ops);
+
 #endif

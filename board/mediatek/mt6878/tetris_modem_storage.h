@@ -66,7 +66,11 @@ int tetris_modem_load_bundle(const struct tetris_modem_storage *storage,
 		void *destination, size_t capacity,
 		struct tetris_modem_layout *layout);
 
-/* Destination must already be reserved in LMB and mapped as writable RAM. */
+/*
+ * Destination must already be reserved in LMB and mapped as writable RAM,
+ * with base and capacity aligned to ARCH_DMA_MINALIGN. Flushes ROM/DSP to
+ * coherency before publishing layout. No automatic caller or reset release.
+ */
 int tetris_modem_load_slot(struct blk_desc *dev, char slot,
 		const unsigned char root_pin[32],
 		const struct tetris_scp_security_ops *ops,
