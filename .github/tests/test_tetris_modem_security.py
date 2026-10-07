@@ -16,6 +16,7 @@ native = None
 bundle_native = None
 storage_native = None
 stage_native = None
+place_native = None
 ReadBlocks = c.CFUNCTYPE(c.c_ulonglong, c.c_void_p, c.c_ulonglong,
                         c.c_ulonglong, c.c_void_p)
 Acquire = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_size_t, c.POINTER(c.c_void_p))
@@ -89,6 +90,11 @@ if len(sys.argv) > 1 and sys.argv[1].endswith(".so"):
                              c.c_void_p, c.POINTER(Ops), c.c_size_t,
                              c.POINTER(Layout)]
     stage_native.restype = c.c_int
+    place_native = library.tetris_modem_place_bundle
+    place_native.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p,
+                             c.POINTER(Ops), c.c_void_p, c.c_size_t,
+                             c.POINTER(Layout)]
+    place_native.restype = c.c_int
 
 
 class ModemSecurityTest(unittest.TestCase):
@@ -198,6 +204,75 @@ class ModemSecurityTest(unittest.TestCase):
     def test_bundle_reference_signatures(self):
         for parts in modem.components(b"".join(self.signed_groups())).values():
             self.assertTrue(self.accepted(parts))
+
+    @unittest.skipUnless(place_native, "native payload placement executes only in CI")
+    def test_place_authenticated_payloads(self):
+        groups = self.signed_groups()
+        # Exercise different group order, with guards outside the destination.
+        for order in ((0, 1, 2), (2, 0, 1), (1, 2, 0)):
+            data = b"".join(groups[i] for i in order)
+            arena = c.create_string_buffer(b"\xa5" * (0x5000 + 32))
+            out = Layout()
+            ret = place_native(data, len(data), bytes.fromhex(self.fixture.root_pin),
+                               c.byref(ops), c.addressof(arena) + 16, 0x5000,
+                               c.byref(out))
+            self.assertEqual(ret, 0)
+            expected = bytearray(b"\xa5" * (0x5000 + 32))
+            expected[16:16 + 1024] = groups[0][512:512 + 1024]
+            expected[16 + 0x3000:16 + 0x3100] = groups[2][512:768]
+            self.assertEqual(arena.raw[:-1], bytes(expected))
+            self.assertEqual((out.rom_size, out.dsp_offset, out.dsp_size),
+                             (1024, 0x3000, 256))
+
+    @unittest.skipUnless(place_native, "native payload placement executes only in CI")
+    def test_place_failures_never_write(self):
+        data = b"".join(self.signed_groups())
+        pin = bytes.fromhex(self.fixture.root_pin)
+        cases = [(data, bytes(32), 0x4000), (data[:-1], pin, 0x4000),
+                 (data, pin, 0x3fff),
+                 (b"".join(self.signed_groups(True)), pin, 0x4000)]
+        groups = self.signed_groups()
+        offset = 0
+        for group in groups:
+            damaged = bytearray(b"".join(groups))
+            damaged[offset + 512] ^= 1
+            cases.append((bytes(damaged), pin, 0x4000))
+            offset += len(group)
+        for value, root, capacity in cases:
+            target = c.create_string_buffer(b"\xa5" * 0x4000)
+            out = Layout()
+            c.memset(c.byref(out), 0xa5, c.sizeof(out))
+            before = target.raw, bytes(out)
+            ret = place_native(value, len(value), root, c.byref(ops), target,
+                               capacity, c.byref(out))
+            self.assertNotEqual(ret, 0)
+            self.assertEqual((target.raw, bytes(out)), before)
+
+    @unittest.skipUnless(place_native, "native payload placement executes only in CI")
+    def test_place_rejects_aliases_and_wrapping_spans(self):
+        data = b"".join(self.signed_groups())
+        source = c.create_string_buffer(data + bytes(0x8000))
+        target = c.create_string_buffer(b"\xa5" * 0x4000)
+        out = Layout()
+        src, dst, output = c.addressof(source), c.addressof(target), c.addressof(out)
+        maximum = c.c_size_t(-1).value
+        cases = [(src, len(data), src, 0x4000, output),
+                 (src, len(data), src + len(data) - 1, 0x4000, output),
+                 (src + 16, len(data), src, 0x4000, output),
+                 (src, len(data), dst, 0x4000, src + 16),
+                 (src, len(data), dst, 0x4000, dst + 16),
+                 (maximum - 15, len(data), dst, 0x4000, output),
+                 (src, len(data), maximum - 15, 0x4000, output),
+                 (src, len(data), dst, 0x4000, maximum - 15),
+                 (src, len(data), 0, 0x4000, output),
+                 (src, len(data), dst, 0, output)]
+        before = source.raw, target.raw, bytes(out)
+        for start, size, dest, capacity, result in cases:
+            ret = place_native(start, size, bytes.fromhex(self.fixture.root_pin),
+                               c.byref(ops), dest, capacity,
+                               c.cast(result, c.POINTER(Layout)))
+            self.assertNotEqual(ret, 0)
+            self.assertEqual((source.raw, target.raw, bytes(out)), before)
 
     def storage_call(self, data, block_size=512, fail_at=None, changes=None,
                      capacity=None, wrong_pin=False, staging=None):

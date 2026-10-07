@@ -122,3 +122,47 @@ int tetris_modem_authenticate_bundle(const void *container, size_t size,
 	*bundle = out;
 	return 0;
 }
+
+static int valid_span(const void *base, size_t size)
+{
+	return base && size && size <= ~0UL - (unsigned long)base;
+}
+
+/* Call only with validated non-wrapping spans. */
+static int overlaps(const void *a, size_t a_size, const void *b, size_t b_size)
+{
+	unsigned long first = (unsigned long)a, second = (unsigned long)b;
+
+	return first < second + b_size && second < first + a_size;
+}
+
+int tetris_modem_place_bundle(const void *container, size_t size,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity,
+		struct tetris_modem_layout *layout)
+{
+	struct tetris_modem_bundle bundle;
+	const unsigned char *source = container;
+	unsigned char *target = destination;
+	int ret;
+
+	if (!valid_span(container, size) || !valid_span(destination, capacity) ||
+	    !valid_span(layout, sizeof(*layout)))
+		return -EINVAL;
+	if (overlaps(container, size, destination, capacity) ||
+	    overlaps(container, size, layout, sizeof(*layout)) ||
+	    overlaps(destination, capacity, layout, sizeof(*layout)))
+		return -EINVAL;
+	ret = tetris_modem_authenticate_bundle(container, size, root_pin, ops,
+					      capacity, &bundle);
+	if (ret)
+		return ret;
+	/* No fallible operation after the first destination write. */
+	memcpy(target, source + bundle.members[0].payload_offset,
+	       bundle.layout.rom_size);
+	memcpy(target + bundle.layout.dsp_offset,
+	       source + bundle.members[2].payload_offset, bundle.layout.dsp_size);
+	*layout = bundle.layout;
+	return 0;
+}

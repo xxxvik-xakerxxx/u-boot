@@ -36,4 +36,20 @@ int tetris_modem_authenticate_bundle(const void *container, size_t size,
 				     size_t reserved_capacity,
 				     struct tetris_modem_bundle *bundle);
 
+/*
+ * Authenticate the complete supported bundle before copying ROM and DSP into
+ * caller-owned, mapped destination RAM. DRDI mode 3 is authenticated but not
+ * copied, matching the layout planner. Gaps and unused capacity are untouched.
+ * Snapshot, destination and output must not overlap. All errors leave both
+ * destination and output unchanged; snapshot must stay immutable throughout.
+ * Caller must establish exclusive ownership, independent trust and platform
+ * policy. This does NOT flush caches, program protection/remaps, release reset
+ * or publish CCCI tags. There is deliberately no automatic boot caller.
+ */
+int tetris_modem_place_bundle(const void *container, size_t size,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity,
+		struct tetris_modem_layout *layout);
+
 #endif

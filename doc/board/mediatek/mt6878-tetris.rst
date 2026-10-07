@@ -259,6 +259,29 @@ tests invalidate the snapshot during release and check success, failed
 allocation, null allocator output, short reads at every chunk, authentication
 failure, failed release and preservation of the first failure.
 
+Authenticated payload placement
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_place_bundle()`` adds the missing RAM copy primitive. It
+authenticates the immutable snapshot and validates the signed layout before
+the first destination write. ROM is copied to offset zero and DSP to the
+signed DSP offset. All three groups are authenticated, but mode-3 DRDI is
+not copied, matching the supported stock profile. Gaps, DSP padding and
+unused reservation capacity are left unchanged; this is not complete modem
+memory initialization.
+
+The snapshot, destination and layout output must be disjoint, non-wrapping
+spans. Authentication, layout or span failure leaves destination and output
+unchanged. The native CI tests compare complete guarded buffers, permute
+group order, corrupt each component, and exercise aliases, capacity errors
+and pointer overflow. Native results are pending for this addition.
+
+No automatic caller is installed. The caller still must establish exclusive
+RAM ownership, immutable snapshot lifetime, independent root trust and
+platform/rollback policy. Cache synchronization, EMI permissions, remaps,
+reset release and CCCI publication are separate outstanding work. Do not use
+this primitive as permission to boot modem firmware or advertise SIM support.
+
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
