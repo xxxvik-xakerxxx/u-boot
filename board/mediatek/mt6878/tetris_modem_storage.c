@@ -70,7 +70,8 @@ int tetris_modem_read_slot(struct blk_desc *dev, char slot, void *buffer,
 		return -EPROTONOSUPPORT;
 	if (slot != 'a' && slot != 'b')
 		return -EINVAL;
-	name = slot == 'a' ? "md1img_a" : "md1img_b";
+	/* B4.1 LK platform table overrides the generic md1img base with modem. */
+	name = slot == 'a' ? "modem_a" : "modem_b";
 	ret = part_get_info_by_name(dev, name, &part);
 	if (ret < 0)
 		return ret;

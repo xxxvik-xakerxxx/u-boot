@@ -202,7 +202,11 @@ Partition snapshot reader
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``tetris_modem_read_slot()`` is an explicit-slot, read-only block adapter for
-``md1img_a`` or ``md1img_b``. The caller must establish the slot externally;
+``modem_a`` or ``modem_b``. The audited B4.1 LK platform table at payload
+offset ``0x1985f8`` selects base name ``modem``; it overrides the generic
+``md1img`` fallback. This is not an alias guessed from partition existence.
+The live Tetris GPT also exposes ``modem_a/b``, each 209715200 bytes.
+The caller must establish the slot externally;
 partition existence, environment defaults and boot-control preference are not
 accepted as proof of the slot that booted. Invalid slots fail and no fallback
 to another slot occurs. The adapter uses the supplied block device's partition
@@ -219,7 +223,9 @@ partial, untrusted data and must not be used after failure.
 
 The caller must supply exclusive staging RAM large enough for the partition;
 this is not the modem destination reservation, and no heap allocation is
-hidden in the reader. Full-snapshot memory budgeting is still needed before
+hidden in the reader. The observed 200 MiB partition cannot fit in Tetris's
+32 MiB malloc arena; a separate owned LMB staging allocation is required.
+Full-snapshot memory budgeting is still needed before
 boot integration. The buffer must remain immutable after authentication.
 Native tests exercise both block sizes, exact chunk addresses, short reads at
 every chunk, corrupt payloads, wrong root pins and out-of-range geometry.
