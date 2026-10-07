@@ -281,6 +281,37 @@ Staging success must not be reported as an applied MPU policy. CI tests cover
 every representable aligned nonzero remap window, DRAM endpoints, undersized
 reservations, unaligned/overflowing addresses and unchanged output on errors.
 
+Checked remap transaction
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_program_remap()`` now executes the two remap operations through
+an injected transport. It reuses the full-window bounds planner, splits the
+physical base into low/high 32-bit arguments, and checks every owned readback
+bit. Command 1 requires zero status, two complete 30-bit register fields and
+only the low twenty bits of shared register 2. Command 2 returns that shared
+register in x0 and the remaining three registers in x1..x3; its x0 must not be
+treated as zero-only status. Negative secure errors, malformed wide replies,
+missing outputs and callback failures all stop the sequence immediately.
+
+The exact audited dispatcher at ``0xbe68``/``0xbe88`` passes low/high base
+words to ``0x1bbe0``/``0x1bcf0``. ``0x1bcbc`` preserves the shared register's
+unowned third field during command 1; ``0x1bd90`` preserves the low twenty
+bits during command 2. These offsets refer to the same hash-pinned ATF above.
+
+A transaction is consumed before the first callback. Neither success nor a
+partial failure can be retried with that transaction. Its last operation and
+raw replies remain available for diagnosis. Invalid preflight inputs cause
+no callbacks and leave the transaction unchanged. CI tests inject every owned
+readback-bit error, secure/transport errors, incomplete replies and repeated
+calls, including windows above 4 GiB. Compilation and native tests run only
+in CI, not on the development host.
+
+There is deliberately no production transport adapter or boot-path caller.
+Before installing one, authenticated platform/firmware selection, reset
+ownership, an exclusive reservation and the complete EMI policy must be
+established. Verified address remapping is not modem boot, safe DMA or a CCCI
+handoff; no hardware call or new SIM functionality is enabled by this change.
+
 One-shot EMI range encoding
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
