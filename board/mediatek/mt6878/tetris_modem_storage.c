@@ -3,6 +3,7 @@
 #include <errno.h>
 #else
 #include <blk.h>
+#include <cpu_func.h>
 #include <part.h>
 #include <lmb.h>
 #include <mapmem.h>
