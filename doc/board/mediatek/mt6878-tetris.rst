@@ -209,3 +209,38 @@ DSP has 5,767,168 stored bytes in an 8,912,896-byte window at relative offset
 DRDI mode is 3. The logical/stored size difference is not attributed to a
 particular transformation without further evidence. Native bounds tests run
 only in CI; there is still no modem boot-path caller or SIM functionality.
+
+Initial physical block map (before protection)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_plan_memory()`` builds a bounded, sorted block map from the same
+authenticated-image inputs and a caller-owned base/capacity. It does not
+allocate that reservation or verify it against DRAM/FDT; the future caller
+must prove ownership. Each block carries relative offset, size, region-info
+bits, attributes and ``base + offset``. The complete allocation, including any
+tail beyond the declared modem memory, remains represented. Output is committed
+only on success; overflow, invalid subregions and more than 32 blocks fail.
+
+The pinned LK initializes a full-capacity block at ``0x261dc`` and annotates
+containing blocks through ``0x26278``. Exact-range annotations OR info/attribute
+bits at ``0x265f8..0x26604``; the split helpers preserve the remainder.
+``0x270e8`` uses the eight masks at payload ``0xcdbbc`` (``1 << region``).
+The footer parser marks MD memory with attribute 1, DSP with 2, eight optional
+padding ranges at ``+0x11c`` with 4, and windows at ``+0x16c``, ``+0x174``,
+``+0x164`` with ``0x20``, ``0x40``, ``0x80`` respectively. Nonempty windows
+must fit a single existing block. Padding overlapping stored ROM or the DSP
+window is additionally rejected by our implementation.
+
+``0x26c80..0x26ca0`` creates the 24-byte offset/size/info/attribute/AP-address
+records; the consumer structure is ``md_mem_blk`` in the pinned Nothing
+``ccci_util_md_mem.c``. Offline arithmetic on the archived B4.1 header yields
+12 initial blocks for a 512 MiB reservation, including the 32 MiB tail.
+This is not a live physical allocation, and these sizes are not hard-coded.
+
+This map is deliberately **not** published as final ``md_mem_layout``.
+Stock then mutates flags/programs protection in ``0x27108`` (including platform
+callbacks through ``0x8196c``), invokes ``0xc200040b`` commands 1/2 from
+``0x277f8``, and only then publishes the map at ``0x25ba4``. Their full secure
+contract, padding reclamation and shared-memory map remain unresolved. No
+protection call, memory release, firmware execution or modem DT activation is
+performed by the new planner. Padding flags alone never authorize releasing RAM.

@@ -21,6 +21,21 @@ plan.argtypes = [c.c_void_p, c.c_size_t, c.c_size_t, c.c_size_t, c.POINTER(Layou
 plan.restype = c.c_int
 
 
+class Block(c.Structure):
+    _fields_ = [(name, c.c_uint) for name in ("offset", "size", "info", "attributes")]
+    _fields_.append(("physical", c.c_ulonglong))
+
+
+class MemoryMap(c.Structure):
+    _fields_ = [("count", c.c_uint), ("blocks", Block * 32)]
+
+
+memory = library.tetris_modem_plan_memory
+memory.argtypes = [c.c_void_p, c.c_size_t, c.c_size_t, c.c_ulonglong,
+                   c.c_size_t, c.POINTER(MemoryMap)]
+memory.restype = c.c_int
+
+
 class LayoutTest(unittest.TestCase):
     def fixture(self):
         rom = bytearray(1024)
@@ -93,6 +108,93 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(out.dsp_offset, 0x1d780000)
         self.assertEqual(out.dsp_capacity, 0x880000)
         self.assertEqual(out.region_count, 4)
+        mapped = MemoryMap()
+        rom = parts["md1rom"][3]
+        self.assertEqual(memory(rom, len(rom), len(parts["md1dsp"][3]),
+                                0x100000000, 0x20000000, c.byref(mapped)), 0)
+        self.assertEqual(mapped.count, 12)
+        self.assertEqual(sum(b.size for b in mapped.blocks[:mapped.count]), 0x20000000)
+        self.assertEqual(mapped.blocks[8].attributes, 0x41)
+        self.assertEqual(mapped.blocks[10].offset, 0x1d780000)
+
+
+class MemoryMapTest(unittest.TestCase):
+    def fixture(self):
+        rom = LayoutTest().fixture()
+        struct.pack_into("<II", rom, len(rom) - 512 + 0x11c, 0x1000, 0x1000)
+        return rom
+
+    def call(self, rom=None, base=0x50000000, capacity=0x8000):
+        rom = self.fixture() if rom is None else rom
+        result = MemoryMap()
+        c.memset(c.byref(result), 0xa5, c.sizeof(result))
+        before = bytes(result)
+        data = bytes(rom)
+        ret = memory(data, len(data), 256, base, capacity, c.byref(result))
+        if ret:
+            self.assertEqual(bytes(result), before)
+        else:
+            self.assertLessEqual(result.count, 32)
+            offset = 0
+            for block in result.blocks[:result.count]:
+                self.assertEqual(block.offset, offset)
+                self.assertGreater(block.size, 0)
+                self.assertEqual(block.physical, base + offset)
+                offset += block.size
+            self.assertEqual(offset, capacity)
+        return ret, result
+
+    def test_split_flags_and_reservation_tail(self):
+        ret, result = self.call()
+        self.assertEqual(ret, 0)
+        self.assertEqual([(b.offset, b.size, b.info, b.attributes)
+                          for b in result.blocks[:result.count]],
+                         [(0, 0x1000, 1, 1), (0x1000, 0x1000, 1, 5),
+                          (0x2000, 0x1000, 1, 1), (0x3000, 0x1000, 2, 3),
+                          (0x4000, 0x4000, 0, 0)])
+        self.assertEqual(self.call(base=0x120000000)[0], 0)
+        self.assertEqual(self.call(capacity=0x4000)[0], 0)
+
+    def test_bad_base_and_capacity(self):
+        for base, capacity in ((0, 0x8000), (2**64 - 0x4000, 0x8000),
+                               (0x50000000, 0), (0x50000000, 0x3fff),
+                               (0x50000000, 2**32)):
+            self.assertNotEqual(self.call(base=base, capacity=capacity)[0], 0)
+
+    def test_padding_must_not_cover_images_or_cross_regions(self):
+        for offset, size in ((0, 0x1000), (0x3000, 0x1000), (0x2800, 0x1000),
+                              (0xffffffff, 0x1000), (0x1000, 0xffffffff)):
+            rom = self.fixture()
+            struct.pack_into("<II", rom, len(rom) - 512 + 0x11c, offset, size)
+            self.assertNotEqual(self.call(rom)[0], 0)
+
+    def test_duplicate_padding_rejected(self):
+        rom = self.fixture()
+        struct.pack_into("<II", rom, len(rom) - 512 + 0x124, 0x1000, 0x1000)
+        self.assertNotEqual(self.call(rom)[0], 0)
+
+    def test_optional_window_flags(self):
+        for field, flag in ((0x16c, 0x20), (0x174, 0x40), (0x164, 0x80)):
+            rom = self.fixture()
+            struct.pack_into("<II", rom, len(rom) - 512 + field, 0x2000, 0x1000)
+            ret, result = self.call(rom)
+            self.assertEqual(ret, 0)
+            self.assertEqual(result.blocks[2].attributes, 1 | flag)
+            struct.pack_into("<II", rom, len(rom) - 512 + field, 0xffffffff, 16)
+            self.assertNotEqual(self.call(rom)[0], 0)
+
+    def test_block_budget_is_atomic(self):
+        rom = self.fixture()
+        head = len(rom) - 512
+        for field, value in ((172, 0x80000), (184, 0x7e000), (192, 8)):
+            struct.pack_into("<I", rom, head + field, value)
+        for i in range(8):
+            struct.pack_into("<II", rom, head + 196 + 8 * i, i * 0x10000, 0x10000)
+            struct.pack_into("<II", rom, head + 0x11c + 8 * i,
+                             i * 0x10000 + 0x2000, 0x1000)
+        for field, offset in ((0x16c, 0x4000), (0x174, 0x6000), (0x164, 0x8000)):
+            struct.pack_into("<II", rom, head + field, offset, 0x1000)
+        self.assertNotEqual(self.call(rom, capacity=0x90000)[0], 0)
 
 
 if __name__ == "__main__":
