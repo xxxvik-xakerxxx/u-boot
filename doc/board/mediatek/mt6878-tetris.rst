@@ -198,6 +198,34 @@ provenance, active slot/SKU, rollback and cross-component version policy,
 memory/reset ownership and complete protection remain execution gates.
 Successful preflight must not publish CCCI-ready state or release modem reset.
 
+Partition snapshot reader
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_read_slot()`` is an explicit-slot, read-only block adapter for
+``md1img_a`` or ``md1img_b``. The caller must establish the slot externally;
+partition existence, environment defaults and boot-control preference are not
+accepted as proof of the slot that booted. Invalid slots fail and no fallback
+to another slot occurs. The adapter uses the supplied block device's partition
+lookup, checks geometry and requires a DMA-aligned staging buffer.
+
+``tetris_modem_read_bundle()`` reads a complete partition snapshot in bounded
+64 KiB chunks, accepting only 512-byte or 4096-byte block geometry. It rejects
+zero/overflowing/out-of-device extents, partitions above 256 MiB and undersized
+buffers before any payload read. A short or failed read stops immediately,
+without retries. Only after the entire snapshot is read does it authenticate
+all selected components and validate the signed layout. Output remains
+unchanged on read or authentication errors; the staging buffer may contain
+partial, untrusted data and must not be used after failure.
+
+The caller must supply exclusive staging RAM large enough for the partition;
+this is not the modem destination reservation, and no heap allocation is
+hidden in the reader. Full-snapshot memory budgeting is still needed before
+boot integration. The buffer must remain immutable after authentication.
+Native tests exercise both block sizes, exact chunk addresses, short reads at
+every chunk, corrupt payloads, wrong root pins and out-of-range geometry.
+CI cross-compiles the actual GPT/block adapter. No automatic boot caller,
+partition writes, modem RAM copy, SMC or CCCI-ready publication is enabled.
+
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

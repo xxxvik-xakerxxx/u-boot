@@ -14,6 +14,14 @@ import tetris_modem_security as modem
 
 native = None
 bundle_native = None
+storage_native = None
+ReadBlocks = c.CFUNCTYPE(c.c_ulonglong, c.c_void_p, c.c_ulonglong,
+                        c.c_ulonglong, c.c_void_p)
+
+
+class Storage(c.Structure):
+    _fields_ = [(name, c.c_ulonglong) for name in ("device_blocks", "start", "blocks")]
+    _fields_ += [("block_size", c.c_uint), ("read", ReadBlocks), ("ctx", c.c_void_p)]
 
 
 class Member(c.Structure):
@@ -64,6 +72,11 @@ if len(sys.argv) > 1 and sys.argv[1].endswith(".so"):
     bundle_native.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p,
                               c.POINTER(Ops), c.c_size_t, c.POINTER(Bundle)]
     bundle_native.restype = c.c_int
+    storage_native = library.tetris_modem_read_bundle
+    storage_native.argtypes = [c.POINTER(Storage), c.c_void_p, c.c_size_t,
+                               c.c_void_p, c.POINTER(Ops), c.c_size_t,
+                               c.POINTER(Bundle)]
+    storage_native.restype = c.c_int
 
 
 class ModemSecurityTest(unittest.TestCase):
@@ -173,6 +186,78 @@ class ModemSecurityTest(unittest.TestCase):
     def test_bundle_reference_signatures(self):
         for parts in modem.components(b"".join(self.signed_groups())).values():
             self.assertTrue(self.accepted(parts))
+
+    def storage_call(self, data, block_size=512, fail_at=None, changes=None,
+                     capacity=None, wrong_pin=False):
+        data += bytes((-len(data)) % block_size)
+        calls = []
+        violations = []
+        start = 17
+
+        @ReadBlocks
+        def read(ctx, block, count, output):
+            calls.append((block, count))
+            offset = (block - start) * block_size
+            length = count * block_size
+            if ctx != 123 or block < start or offset + length > len(data):
+                violations.append((ctx, block, count))
+                return 0
+            if len(calls) == fail_at:
+                return count - 1
+            c.memmove(output, data[offset:offset + length], length)
+            return count
+
+        storage = Storage(start + len(data) // block_size, start,
+                          len(data) // block_size, block_size, read, 123)
+        for name, value in (changes or {}).items():
+            setattr(storage, name, value)
+        buffer = c.create_string_buffer(len(data))
+        out = Bundle()
+        c.memset(c.byref(out), 0xa5, c.sizeof(out))
+        before = bytes(out)
+        pin = bytes(32) if wrong_pin else bytes.fromhex(self.fixture.root_pin)
+        ret = storage_native(c.byref(storage), buffer,
+                             len(data) if capacity is None else capacity,
+                             pin, c.byref(ops), 0x4000, c.byref(out))
+        self.assertFalse(violations, "reader escaped the partition")
+        if ret:
+            self.assertEqual(bytes(out), before)
+        else:
+            self.assertEqual(buffer.raw, data)
+        return ret, calls
+
+    @unittest.skipUnless(storage_native, "native storage executes only in CI")
+    def test_storage_snapshot_then_authentication(self):
+        data = b"".join(self.signed_groups())
+        data += bytes(3 * 65536 - len(data))
+        for block_size in (512, 4096):
+            ret, calls = self.storage_call(data, block_size)
+            self.assertEqual(ret, 0)
+            self.assertEqual(calls, [(17 + i * (65536 // block_size),
+                                     65536 // block_size) for i in range(3)])
+            for failure in (1, 2, 3):
+                ret, calls = self.storage_call(data, block_size, fail_at=failure)
+                self.assertNotEqual(ret, 0)
+                self.assertEqual(len(calls), failure, "short read must not retry")
+        self.assertNotEqual(self.storage_call(data, wrong_pin=True)[0], 0)
+        damaged = bytearray(data)
+        damaged[512] ^= 1
+        self.assertNotEqual(self.storage_call(bytes(damaged))[0], 0)
+
+    @unittest.skipUnless(storage_native, "native storage executes only in CI")
+    def test_storage_bounds_before_any_read(self):
+        data = b"".join(self.signed_groups())
+        for changes in ({"block_size": 0}, {"block_size": 1024},
+                        {"blocks": 0}, {"blocks": (256 * 1024 * 1024 // 512) + 1},
+                        {"start": 2**64 - 1}, {"device_blocks": 17},
+                        {"start": 2**64 - 16, "blocks": 32,
+                         "device_blocks": 2**64 - 1}):
+            ret, calls = self.storage_call(data, changes=changes)
+            self.assertNotEqual(ret, 0)
+            self.assertEqual(calls, [])
+        ret, calls = self.storage_call(data, capacity=len(data) - 1)
+        self.assertNotEqual(ret, 0)
+        self.assertEqual(calls, [])
 
     @unittest.skipUnless(bundle_native, "native bundle executes only in CI")
     def test_bundle_signed_groups_and_layout(self):
