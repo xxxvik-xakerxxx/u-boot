@@ -9,10 +9,12 @@
 #include <u-boot/rsa.h>
 #include <u-boot/sha256.h>
 #endif
+#include <linux/kernel.h>
 #include <linux/asn1_decoder.h>
 #include "tetris_scp_fields.asn1.h"
 #include "tetris_scp_security.h"
 #include "tetris_scp_crypto.h"
+#include "tetris_modem_security.h"
 
 #define MAX_CERT 16384U
 #define MAX_FIELDS 48U
@@ -225,6 +227,35 @@ static int get_digest(const struct certificate *cert, unsigned char group,
 	return 0;
 }
 
+static int verify_chain(const void *cert1, size_t size1,
+			const void *cert2, size_t size2,
+			const unsigned char root_pin[32],
+			const struct tetris_scp_security_ops *ops,
+			struct certificate *leaf)
+{
+	struct certificate root;
+	const struct field *delegated;
+	unsigned char digest[32];
+	int ret;
+
+	if (!root_pin || !ops || !ops->sha256 || !ops->verify ||
+	    parse_cert(cert1, size1, &root) || parse_cert(cert2, size2, leaf))
+		return -EINVAL;
+	ops->sha256(root.key.data, root.key.size, digest);
+	if (memcmp(digest, root_pin, 32))
+		return -EACCES;
+	delegated = metadata_field(&root, 1, 2);
+	if (!delegated || !equal(delegated, &leaf->key))
+		return -EACCES;
+	ret = ops->verify(root.raw_key.data, root.raw_key.size, root.tbs.data, root.tbs.size,
+			  root.signature.data + root.signature.header + 1);
+	if (ret)
+		return ret;
+	return ops->verify(leaf->raw_key.data, leaf->raw_key.size,
+			   leaf->tbs.data, leaf->tbs.size,
+			   leaf->signature.data + leaf->signature.header + 1);
+}
+
 int tetris_scp_authenticate(const void *cert1, size_t size1,
 			    const void *cert2, size_t size2,
 			    const void *image, size_t image_size,
@@ -232,30 +263,16 @@ int tetris_scp_authenticate(const void *cert1, size_t size1,
 			    const struct tetris_scp_security_ops *ops,
 			    struct tetris_scp_security_metadata *metadata)
 {
-	struct certificate root, leaf;
-	const struct field *delegated;
+	struct certificate leaf;
 	unsigned char digest[32];
-	int ret = -EINVAL;
+	int ret;
 
 	if (!metadata)
 		return -EINVAL;
 	memset(metadata, 0, sizeof(*metadata));
-	if (!root_pin || !ops || !ops->sha256 || !ops->verify || !image ||
-	    !image_size || image_size > 0xe00000 || image_size % 16 ||
-	    parse_cert(cert1, size1, &root) || parse_cert(cert2, size2, &leaf))
+	if (!image || !image_size || image_size > 0xe00000 || image_size % 16)
 		return -EINVAL;
-	ops->sha256(root.key.data, root.key.size, digest);
-	if (memcmp(digest, root_pin, 32))
-		return -EACCES;
-	delegated = metadata_field(&root, 1, 2);
-	if (!delegated || !equal(delegated, &leaf.key))
-		return -EACCES;
-	ret = ops->verify(root.raw_key.data, root.raw_key.size, root.tbs.data, root.tbs.size,
-			  root.signature.data + root.signature.header + 1);
-	if (ret)
-		return ret;
-	ret = ops->verify(leaf.raw_key.data, leaf.raw_key.size, leaf.tbs.data, leaf.tbs.size,
-			  leaf.signature.data + leaf.signature.header + 1);
+	ret = verify_chain(cert1, size1, cert2, size2, root_pin, ops, &leaf);
 	if (ret)
 		return ret;
 	if (get_digest(&leaf, 2, 1, metadata->ciphertext) ||
@@ -269,6 +286,44 @@ int tetris_scp_authenticate(const void *cert1, size_t size1,
 failed:
 	memset(metadata, 0, sizeof(*metadata));
 	return -EACCES;
+}
+
+int tetris_modem_verify_signature(const void *cert1, size_t size1,
+				  const void *cert2, size_t size2,
+				  const void *header, size_t header_size,
+				  const void *image, size_t image_size,
+				  const unsigned char root_pin[32],
+				  const struct tetris_scp_security_ops *ops)
+{
+	static const unsigned char zero_bits[] = { 3, 2, 0, 0 };
+	static const unsigned char items[][2] = { { 2, 6 }, { 2, 8 }, { 4, 2 } };
+	struct certificate leaf;
+	const struct field *field;
+	unsigned char digest[32], expected[32];
+	size_t i;
+	int ret;
+
+	if (!header || header_size != 512 || !image || !image_size ||
+	    image_size > 64 * 1024 * 1024 || image_size % 16)
+		return -EINVAL;
+	ret = verify_chain(cert1, size1, cert2, size2, root_pin, ops, &leaf);
+	if (ret)
+		return ret;
+	/* Only the observed B4.1 non-transform profile; never infer an SMC. */
+	for (i = 0; i < ARRAY_SIZE(items); i++) {
+		field = metadata_field(&leaf, items[i][0], items[i][1]);
+		if (!field || !bytes(field, zero_bits, sizeof(zero_bits)))
+			return -EPROTONOSUPPORT;
+	}
+	if (get_digest(&leaf, 2, 4, expected))
+		return -EINVAL;
+	ops->sha256(header, header_size, digest);
+	if (memcmp(digest, expected, sizeof(digest)))
+		return -EACCES;
+	if (get_digest(&leaf, 2, 1, expected))
+		return -EINVAL;
+	ops->sha256(image, image_size, digest);
+	return memcmp(digest, expected, sizeof(digest)) ? -EACCES : 0;
 }
 
 int tetris_scp_prepare_component(struct tetris_scp_crypto *crypto, void *page,

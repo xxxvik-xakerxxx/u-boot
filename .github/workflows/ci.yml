@@ -67,8 +67,10 @@ jobs:
             -r tools/u_boot_pylib/requirements.txt
           pip install -r tools/tetris-scp-security-requirements.txt
 
-      - name: Test SCP certificate and ciphertext verification
-        run: .venv/bin/python .github/tests/test_tetris_scp_security.py
+      - name: Test SCP and modem signature verification
+        run: |
+          .venv/bin/python .github/tests/test_tetris_scp_security.py
+          .venv/bin/python .github/tests/test_tetris_modem_security.py
 
       - name: Test SCP secure transport without hardware
         run: |
@@ -76,7 +78,7 @@ jobs:
           sh .github/tests/run_tetris_scp_tcm.sh
           sh .github/tests/run_tetris_scp_secure.sh
 
-      - name: Test runtime SCP certificate verifier
+      - name: Test native SCP and modem certificate verifiers
         run: PYTHON=.venv/bin/python sh .github/tests/run_tetris_scp_security_c.sh
 
       - name: Test strict RSA-PSS salt length with U-Boot crypto

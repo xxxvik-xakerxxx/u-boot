@@ -132,3 +132,40 @@ modem loader: the current LK-replacement boot path still reports ``no-fdt``.
 Authenticated firmware loading, memory ownership and Linux CCCI publication
 remain prerequisites before SIM or calls can work. No modem SMC, partition
 write, DT consumer activation or SCP/display path is changed by this support.
+
+Modem signature verification prerequisite
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_verify_signature()`` shares the bounded DER/RSA-PSS chain
+verification with SCP, but has a separate image profile. It checks an
+independently supplied root SPKI hash, delegated key, both signatures, and the
+signed SHA256 of both the complete 512-byte member header (OID suffix ``2.4``)
+and payload (``2.1``). Only the observed one-byte zero values for ``2.6``,
+``2.8`` and ``4.2`` are accepted; encrypted/unknown profiles are rejected.
+Inputs are caller-owned immutable buffers, payloads are limited to 64 MiB,
+and the function neither writes memory nor calls ATF. There is no modem
+boot-path caller yet. SCP keeps its existing encrypted-image profile and limit.
+
+Offline evidence, 2026-10-07: all three components (``md1rom``, ``md1drdi``,
+``md1dsp``) in the archived B4.1 modem container SHA256
+``b15207a948125439a5957224d65774d9d44c558c6eb285372a520b27b8d7d6c5``
+passed the Python reference's signature, delegated-key, header and payload
+hash checks. Their root SPKI hashes match. The image-derived pin used for
+this experiment establishes internal consistency, NOT device root trust.
+No proprietary firmware or certificate contents are committed.
+
+``tools/tetris_modem_security.py`` reproduces those checks without hardware;
+it preserves adjacent image/certificate groups, scans at most 128 headers,
+and stops after finding the three components (it does not certify the rest of
+the partition). It requires an explicit ``--root-sha256`` argument and reports
+``boot_ready: false``. CI tests the C verifier with synthetic RSA chains and
+checks corrupted certificates, header/payload hashes, truncations, wrong root
+pins and incompatible SCP/transform profiles. Set ``MODEM_TEST_IMAGE`` for
+the optional offline real-container consistency test; vendor images are not CI
+inputs. Local C compilation is not part of this workflow.
+
+Still required before execution: device-root provenance, rollback and SKU
+policy, active-slot selection, full member-header semantics, authenticated
+CHECK_HEADER/memory layout, reservations, and ATF modem reset/protection
+ownership. A valid signature alone must not enable a modem DT node or publish
+a successful CCCI handoff.
