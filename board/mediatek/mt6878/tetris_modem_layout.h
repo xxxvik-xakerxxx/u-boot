@@ -34,6 +34,14 @@ struct tetris_modem_remap {
 	unsigned int mask[6];
 };
 
+struct tetris_modem_emi_range {
+	unsigned long long start_page;
+	unsigned long long end_page;
+	unsigned long long start_readback;
+	unsigned long long end_readback;
+	unsigned int slot;
+};
+
 /*
  * Relative load plan only: caller must authenticate both immutable images,
  * establish device/rollback policy and exclusively reserve the supplied
@@ -68,5 +76,15 @@ int tetris_modem_plan_remap(unsigned long long base,
 			    unsigned long long dram_base,
 			    unsigned long long dram_size,
 			    struct tetris_modem_remap *remap);
+
+/*
+ * Encode one modem EMI range for the audited ATF, using LK's start+size end
+ * convention. Reject page truncation before any one-shot slot programming.
+ * Slots are limited to the stock modem table (32..43). This is not a permission
+ * preset, reservation/overlap check or authorization to issue an SMC; slot 40
+ * additionally needs a validated permission preset. Output is atomic.
+ */
+int tetris_modem_plan_emi(unsigned long long start, unsigned long long size,
+			  unsigned int slot, struct tetris_modem_emi_range *range);
 
 #endif

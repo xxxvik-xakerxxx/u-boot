@@ -216,3 +216,25 @@ int tetris_modem_plan_remap(unsigned long long base,
 	*remap = out;
 	return 0;
 }
+
+int tetris_modem_plan_emi(unsigned long long start, unsigned long long size,
+			  unsigned int slot, struct tetris_modem_emi_range *range)
+{
+	struct tetris_modem_emi_range out = { 0 };
+	const unsigned long long origin = 0x40000000ULL;
+	const unsigned long long limit = origin + (1ULL << 35);
+
+	if (!range || !size || ((start | size) & 4095) || slot < 32 || slot > 43)
+		return -EINVAL;
+	/* ATF masks input pages to 24 bits, then stores 23 relative page bits. */
+	if (start < origin || start >= limit || size >= limit - start)
+		return -ERANGE;
+	out.start_page = start >> 12;
+	out.end_page = (start + size) >> 12;
+	out.start_readback = start;
+	/* The raw end getter retains the enable marker from register bit 31. */
+	out.end_readback = (start + size) | (1ULL << 43);
+	out.slot = slot;
+	*range = out;
+	return 0;
+}

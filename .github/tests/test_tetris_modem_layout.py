@@ -40,6 +40,49 @@ class Remap(c.Structure):
     _fields_ = [("value", c.c_uint * 6), ("mask", c.c_uint * 6)]
 
 
+class EmiRange(c.Structure):
+    _fields_ = [(name, c.c_ulonglong) for name in (
+        "start_page", "end_page", "start_readback", "end_readback")]
+    _fields_.append(("slot", c.c_uint))
+
+
+emi = library.tetris_modem_plan_emi
+emi.argtypes = [c.c_ulonglong, c.c_ulonglong, c.c_uint, c.POINTER(EmiRange)]
+emi.restype = c.c_int
+
+
+class EmiTest(unittest.TestCase):
+    def call(self, start=0x80000000, size=0x200000, slot=32):
+        out = EmiRange()
+        c.memset(c.byref(out), 0xa5, c.sizeof(out))
+        before = bytes(out)
+        ret = emi(start, size, slot, c.byref(out))
+        if ret:
+            self.assertEqual(bytes(out), before)
+        return ret, out
+
+    def test_modem_slots_and_raw_readbacks(self):
+        for slot in range(32, 44):
+            for start in (0x40000000, 0x80000000, 0x120000000, 0x83fffe000):
+                ret, out = self.call(start, 4096, slot)
+                self.assertEqual(ret, 0)
+                self.assertEqual(out.start_page, start >> 12)
+                self.assertEqual(out.end_page, (start + 4096) >> 12)
+                self.assertEqual(out.start_readback, start)
+                self.assertEqual(out.end_readback, (start + 4096) | (1 << 43))
+                self.assertEqual(out.slot, slot)
+
+    def test_reject_truncation_and_bad_slots_before_programming(self):
+        for kwargs in (dict(start=0), dict(start=0x3ffff000),
+                       dict(start=0x80000001), dict(size=0), dict(size=4095),
+                       dict(start=0x840000000), dict(start=0x83ffff000, size=4096),
+                       dict(start=0x10080000000), dict(size=2**64 - 4096),
+                       dict(slot=0), dict(slot=31), dict(slot=44), dict(slot=64)):
+            with self.subTest(**kwargs):
+                self.assertNotEqual(self.call(**kwargs)[0], 0)
+        self.assertNotEqual(emi(0x80000000, 4096, 32, None), 0)
+
+
 remap = library.tetris_modem_plan_remap
 remap.argtypes = [c.c_ulonglong] * 4 + [c.POINTER(Remap)]
 remap.restype = c.c_int

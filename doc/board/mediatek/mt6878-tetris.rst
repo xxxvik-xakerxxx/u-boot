@@ -279,3 +279,28 @@ at ``0x198678``. Its downstream protection application still needs tracing;
 staging success must not be reported as an applied MPU policy. CI tests cover
 every representable aligned nonzero remap window, DRAM endpoints, undersized
 reservations, unaligned/overflowing addresses and unchanged output on errors.
+
+One-shot EMI range encoding
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_plan_emi()`` prepares one range for the same audited ATF without
+calling it. It bounds slots to the LK modem table (32..43), requires nonempty
+4 KiB-aligned ranges and rejects address truncation. The end uses LK's
+``start + size`` convention, not ``start + size - 1``. The register's physical
+endpoint semantics still require hardware documentation or validation.
+
+ATF command 0 enters ``0x2f618``. ``0x10300`` masks both input page numbers to
+24 bits and subtracts the fixed ``0x40000000`` origin; ``0x2d61c`` stores only
+23 relative page bits. Both endpoints must therefore remain below
+``0x840000000``. The encoder rejects, rather than emulates, this truncation.
+``0x10380`` marks modem slots consumed before programming; a repeated command
+returns ``-4``. Invalid range/slot errors return ``-3``. These slots must not
+be retried after an attempted configuration without establishing fresh state.
+
+Command 2 subcommands 0/1 read back start/end; subcommand 3 reads enable state.
+The end getter includes register bit 31 shifted into returned bit 43. The
+encoder supplies the exact expected raw readbacks, preserving this distinction
+from an address. Bounds and enabled-state readback do not prove permissions.
+Command 6 accepts only slot 40 and preset 0..3 for this ATF; other requests
+return ``-4``. Preset application, table ownership and the complete protection
+transaction remain separate prerequisites; no runtime boot caller is enabled.
