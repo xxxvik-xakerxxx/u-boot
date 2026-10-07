@@ -30,17 +30,14 @@ static int snapshot_size(const struct tetris_modem_storage *storage, size_t *byt
 	return 0;
 }
 
-int tetris_modem_read_bundle(const struct tetris_modem_storage *storage,
-		void *buffer, size_t capacity, const unsigned char root_pin[32],
-		const struct tetris_scp_security_ops *ops, size_t reserved_capacity,
-		struct tetris_modem_bundle *bundle)
+static int read_snapshot(const struct tetris_modem_storage *storage,
+			 void *buffer, size_t capacity, size_t *size)
 {
 	unsigned long long done = 0, count, chunk;
 	size_t bytes;
 	int ret;
 
-	if (!storage || !storage->read || !buffer || !root_pin || !ops ||
-	    !ops->sha256 || !ops->verify || !bundle || !reserved_capacity)
+	if (!buffer)
 		return -EINVAL;
 	ret = snapshot_size(storage, &bytes);
 	if (ret)
@@ -57,6 +54,24 @@ int tetris_modem_read_bundle(const struct tetris_modem_storage *storage,
 			return -EIO;
 		done += count;
 	}
+	*size = bytes;
+	return 0;
+}
+
+int tetris_modem_read_bundle(const struct tetris_modem_storage *storage,
+		void *buffer, size_t capacity, const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops, size_t reserved_capacity,
+		struct tetris_modem_bundle *bundle)
+{
+	size_t bytes;
+	int ret;
+
+	if (!root_pin || !ops || !ops->sha256 || !ops->verify || !bundle ||
+	    !reserved_capacity)
+		return -EINVAL;
+	ret = read_snapshot(storage, buffer, capacity, &bytes);
+	if (ret)
+		return ret;
 	return tetris_modem_authenticate_bundle(buffer, bytes, root_pin, ops,
 					      reserved_capacity, bundle);
 }
@@ -89,6 +104,55 @@ int tetris_modem_stage_bundle(const struct tetris_modem_storage *storage,
 	if (release_ret)
 		return release_ret;
 	*layout = bundle.layout;
+	return 0;
+}
+
+static int separate(const void *a, size_t a_size, const void *b, size_t b_size)
+{
+	unsigned long x = (unsigned long)a, y = (unsigned long)b;
+
+	return x && y && a_size && b_size && a_size <= ~0UL - x &&
+	       b_size <= ~0UL - y && (x + a_size <= y || y + b_size <= x);
+}
+
+int tetris_modem_load_bundle(const struct tetris_modem_storage *storage,
+		const struct tetris_modem_staging_ops *memory,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity,
+		struct tetris_modem_layout *layout)
+{
+	struct tetris_modem_layout result;
+	void *buffer = NULL;
+	size_t bytes, used;
+	int ret, release_ret;
+
+	if (!memory || !memory->acquire || !memory->release || !root_pin ||
+	    !ops || !ops->sha256 || !ops->verify ||
+	    !separate(destination, capacity, layout, sizeof(*layout)))
+		return -EINVAL;
+	ret = snapshot_size(storage, &bytes);
+	if (ret)
+		return ret;
+	ret = memory->acquire(memory->ctx, bytes, &buffer);
+	if (ret)
+		return ret;
+	/* Reject aliasing before storage DMA can overwrite destination or output. */
+	if (!separate(buffer, bytes, destination, capacity) ||
+	    !separate(buffer, bytes, layout, sizeof(*layout))) {
+		ret = -EINVAL;
+	} else {
+		ret = read_snapshot(storage, buffer, bytes, &used);
+		if (!ret)
+			ret = tetris_modem_place_bundle(buffer, used, root_pin, ops,
+						 destination, capacity, &result);
+	}
+	release_ret = memory->release(memory->ctx, buffer, bytes);
+	if (ret)
+		return ret;
+	if (release_ret)
+		return release_ret;
+	*layout = result;
 	return 0;
 }
 
@@ -194,5 +258,27 @@ int tetris_modem_stage_slot(struct blk_desc *dev, char slot,
 		return ret;
 	return tetris_modem_stage_bundle(&storage, &memory, root_pin, ops,
 					reserved_capacity, layout);
+}
+
+int tetris_modem_load_slot(struct blk_desc *dev, char slot,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity,
+		struct tetris_modem_layout *layout)
+{
+	struct staging_allocation allocation = { 0 };
+	const struct tetris_modem_staging_ops memory = {
+		.acquire = acquire_staging,
+		.release = release_staging,
+		.ctx = &allocation,
+	};
+	struct tetris_modem_storage storage;
+	int ret;
+
+	ret = slot_storage(dev, slot, &storage);
+	if (ret)
+		return ret;
+	return tetris_modem_load_bundle(&storage, &memory, root_pin, ops,
+				       destination, capacity, layout);
 }
 #endif

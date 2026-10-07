@@ -274,13 +274,40 @@ The snapshot, destination and layout output must be disjoint, non-wrapping
 spans. Authentication, layout or span failure leaves destination and output
 unchanged. The native CI tests compare complete guarded buffers, permute
 group order, corrupt each component, and exercise aliases, capacity errors
-and pointer overflow. Native results are pending for this addition.
+and pointer overflow. These tests and the ARM64 build passed CI 37659088044
+at commit ``4a59eb63c5``; this was not a device test.
 
 No automatic caller is installed. The caller still must establish exclusive
 RAM ownership, immutable snapshot lifetime, independent root trust and
 platform/rollback policy. Cache synchronization, EMI permissions, remaps,
 reset release and CCCI publication are separate outstanding work. Do not use
 this primitive as permission to boot modem firmware or advertise SIM support.
+
+Scoped partition-to-RAM loading
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_load_slot()`` now connects exact-slot GPT lookup, temporary
+LMB allocation, bounded partition reads, authentication and ROM/DSP placement.
+The caller must reserve and map the modem destination before entry. No default
+slot, root pin, automatic caller, secure-monitor operation or reset is added.
+
+``tetris_modem_load_bundle()`` keeps the snapshot alive until placement finishes
+and releases it exactly once after acquisition, including failure paths.
+Overlap and wrapping checks happen before reads can overwrite the destination
+or output. Authentication runs once, after the complete snapshot is read.
+Only a successful placement AND release publishes the pointer-free layout.
+An earlier read/authentication error takes precedence over cleanup failure.
+
+Unlike the placement primitive, this wrapper may return a release error after
+verified payload bytes were copied. Such a result must abort boot; destination
+contents alone are never evidence of successful loading. Neither function
+performs cache synchronization or grants execution permission.
+
+New native tests cover 512/4096-byte storage, short reads at each chunk,
+allocation and release errors, null/overlapping/wrapping staging buffers,
+authentication failure and preservation of the first failure. The release
+mock destroys the snapshot and verifies copying happened before that point.
+Results for this new wrapper are pending CI.
 
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~

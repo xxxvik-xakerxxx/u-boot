@@ -52,6 +52,27 @@ int tetris_modem_stage_slot(struct blk_desc *dev, char slot,
 		const struct tetris_scp_security_ops *ops, size_t reserved_capacity,
 		struct tetris_modem_layout *layout);
 
+/*
+ * Read, authenticate and place payloads before releasing the snapshot. Caller
+ * owns destination exclusively; allocator/releaser must not modify other RAM.
+ * Layout is published only after successful release. A release failure may
+ * leave verified payload bytes in destination, but MUST NOT authorize boot.
+ * No cache flush, SMC, reset or DT publication. Placement policy still applies.
+ */
+int tetris_modem_load_bundle(const struct tetris_modem_storage *storage,
+		const struct tetris_modem_staging_ops *memory,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity,
+		struct tetris_modem_layout *layout);
+
+/* Destination must already be reserved in LMB and mapped as writable RAM. */
+int tetris_modem_load_slot(struct blk_desc *dev, char slot,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity,
+		struct tetris_modem_layout *layout);
+
 /* Explicit, externally established slot 'a' or 'b'; no fallback or inference. */
 int tetris_modem_read_slot(struct blk_desc *dev, char slot, void *buffer,
 		size_t capacity, const unsigned char root_pin[32],

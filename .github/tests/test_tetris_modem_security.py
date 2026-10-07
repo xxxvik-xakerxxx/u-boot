@@ -17,6 +17,7 @@ bundle_native = None
 storage_native = None
 stage_native = None
 place_native = None
+load_native = None
 ReadBlocks = c.CFUNCTYPE(c.c_ulonglong, c.c_void_p, c.c_ulonglong,
                         c.c_ulonglong, c.c_void_p)
 Acquire = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_size_t, c.POINTER(c.c_void_p))
@@ -95,6 +96,11 @@ if len(sys.argv) > 1 and sys.argv[1].endswith(".so"):
                              c.POINTER(Ops), c.c_void_p, c.c_size_t,
                              c.POINTER(Layout)]
     place_native.restype = c.c_int
+    load_native = library.tetris_modem_load_bundle
+    load_native.argtypes = [c.POINTER(Storage), c.POINTER(StagingOps),
+                            c.c_void_p, c.POINTER(Ops), c.c_void_p,
+                            c.c_size_t, c.POINTER(Layout)]
+    load_native.restype = c.c_int
 
 
 class ModemSecurityTest(unittest.TestCase):
@@ -275,7 +281,7 @@ class ModemSecurityTest(unittest.TestCase):
             self.assertEqual((source.raw, target.raw, bytes(out)), before)
 
     def storage_call(self, data, block_size=512, fail_at=None, changes=None,
-                     capacity=None, wrong_pin=False, staging=None):
+                     capacity=None, wrong_pin=False, staging=None, load=False):
         data += bytes((-len(data)) % block_size)
         calls = []
         violations = []
@@ -301,6 +307,9 @@ class ModemSecurityTest(unittest.TestCase):
         for name, value in (changes or {}).items():
             setattr(storage, name, value)
         buffer = c.create_string_buffer(len(data))
+        target = c.create_string_buffer(b"\xa5" * (0x4000 + 32))
+        target_before = target.raw
+        target_at_release = []
         out = Bundle() if staging is None else Layout()
         c.memset(c.byref(out), 0xa5, c.sizeof(out))
         before = bytes(out)
@@ -327,12 +336,18 @@ class ModemSecurityTest(unittest.TestCase):
                 expected = None if staging.get("null_buffer") else c.addressof(buffer)
                 if ctx != 456 or address != expected or size != len(data):
                     violations.append("invalid release")
+                target_at_release.append(target.raw)
                 c.memset(buffer, 0xdd, len(data))  # Invalidate the entire snapshot.
                 return -16 if staging.get("release_error") else 0
 
             memory = StagingOps(acquire, release, 456)
-            ret = stage_native(c.byref(storage), c.byref(memory), pin,
-                               c.byref(ops), 0x4000, c.byref(out))
+            if load:
+                ret = load_native(c.byref(storage), c.byref(memory), pin,
+                                  c.byref(ops), c.addressof(target) + 16,
+                                  0x4000, c.byref(out))
+            else:
+                ret = stage_native(c.byref(storage), c.byref(memory), pin,
+                                   c.byref(ops), 0x4000, c.byref(out))
             if changes:
                 self.assertEqual(events, [], "invalid geometry must not allocate")
             if events:
@@ -344,6 +359,18 @@ class ModemSecurityTest(unittest.TestCase):
                     self.assertEqual(events[-1], "release")
                     self.assertEqual(events.count("release"), 1)
         self.assertFalse(violations, "reader escaped the partition")
+        if load:
+            # A cleanup error is after placement; all earlier failures are before it.
+            if ret in (0, -16) and not wrong_pin and fail_at is None:
+                expected = bytearray(target_before)
+                expected[16:1040] = data[512:1536]
+                dsp = data.index(b"md1dsp") - 8 + 512
+                expected[16 + 0x3000:16 + 0x3100] = data[dsp:dsp + 256]
+                self.assertEqual(target.raw, bytes(expected))
+                self.assertEqual(target_at_release, [bytes(expected)],
+                                 "placement must precede snapshot release")
+            else:
+                self.assertEqual(target.raw, target_before)
         if ret:
             self.assertEqual(bytes(out), before)
         elif staging is None:
@@ -352,6 +379,64 @@ class ModemSecurityTest(unittest.TestCase):
             self.assertEqual(out.rom_size, 1024)
             self.assertEqual(out.dsp_offset, 0x3000)
         return ret, calls
+
+    @unittest.skipUnless(load_native, "native loading executes only in CI")
+    def test_load_snapshot_lifetime(self):
+        data = b"".join(self.signed_groups())
+        data += bytes(3 * 65536 - len(data))
+        for block_size in (512, 4096):
+            self.assertEqual(self.storage_call(data, block_size, staging={}, load=True)[0], 0)
+            for failure in (1, 2, 3):
+                ret, calls = self.storage_call(data, block_size, fail_at=failure,
+                                               staging={}, load=True)
+                self.assertNotEqual(ret, 0)
+                self.assertEqual(len(calls), failure)
+        for settings in ({"acquire_error": True}, {"null_buffer": True},
+                         {"release_error": True}):
+            self.assertNotEqual(self.storage_call(data, staging=settings, load=True)[0], 0)
+        self.assertNotEqual(self.storage_call(data, staging={}, load=True, wrong_pin=True)[0], 0)
+        first = self.storage_call(data, fail_at=1, staging={}, load=True)[0]
+        both = self.storage_call(data, fail_at=1, staging={"release_error": True}, load=True)[0]
+        self.assertEqual(first, both)
+        for changes in ({"blocks": 0}, {"block_size": 0}, {"device_blocks": 17}):
+            ret, calls = self.storage_call(data, changes=changes, staging={}, load=True)
+            self.assertNotEqual(ret, 0)
+            self.assertEqual(calls, [])
+
+    @unittest.skipUnless(load_native, "native loading executes only in CI")
+    def test_load_rejects_aliases_before_storage_read(self):
+        arena = c.create_string_buffer(b"\xa5" * 0x8000)
+        output = Layout()
+        base = c.addressof(arena)
+        for alias in (base, base + 0x3fff, c.addressof(output), 0,
+                      c.c_size_t(-1).value - 15):
+            events = []
+
+            @ReadBlocks
+            def read(ctx, block, count, buffer):
+                events.append("read")
+                return 0
+
+            @Acquire
+            def acquire(ctx, size, buffer):
+                events.append("acquire")
+                buffer[0] = alias
+                return 0
+
+            @Release
+            def release(ctx, buffer, size):
+                events.append("release")
+                return 0
+
+            storage = Storage(32, 1, 4, 512, read, None)
+            memory = StagingOps(acquire, release, None)
+            before = arena.raw, bytes(output)
+            ret = load_native(c.byref(storage), c.byref(memory),
+                              bytes.fromhex(self.fixture.root_pin), c.byref(ops),
+                              base, 0x4000, c.byref(output))
+            self.assertNotEqual(ret, 0)
+            self.assertEqual(events, ["acquire", "release"])
+            self.assertEqual((arena.raw, bytes(output)), before)
 
     @unittest.skipUnless(stage_native, "native staging executes only in CI")
     def test_staging_lifetime_and_cleanup(self):
