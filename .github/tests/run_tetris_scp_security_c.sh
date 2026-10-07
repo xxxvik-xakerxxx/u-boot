@@ -16,8 +16,11 @@ cc=${HOSTCC:-cc}
 "$cc" -std=gnu11 -Wall -Wextra -Wno-unused-but-set-variable \
     -Wno-unused-variable -include stddef.h -shared -fPIC \
     -DTETRIS_SCP_SECURITY_HOST_TEST -DTETRIS_SCP_CRYPTO_HOST_TEST \
+    -DTETRIS_MODEM_LAYOUT_HOST_TEST \
     -I"$work/include" -I"$root/.github/tests/asn1-host" -I"$work" \
     "$root/lib/asn1_decoder.c" "$work/tetris_scp_fields.asn1.c" \
-    "$board/tetris_scp_security.c" "$board/tetris_scp_crypto.c" -o "$work/security.so"
+    "$board/tetris_scp_security.c" "$board/tetris_scp_crypto.c" \
+    "$board/tetris_modem_layout.c" -o "$work/security.so"
 "${PYTHON:-python3}" "$root/.github/tests/test_tetris_scp_security_c.py" "$work/security.so"
 "${PYTHON:-python3}" "$root/.github/tests/test_tetris_modem_security.py" "$work/security.so"
+"${PYTHON:-python3}" "$root/.github/tests/test_tetris_modem_layout.py" "$work/security.so"

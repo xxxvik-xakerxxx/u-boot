@@ -116,6 +116,7 @@ jobs:
             board/mediatek/mt6878/tetris_scp_handoff.o \
             board/mediatek/mt6878/tetris_scp_crypto.o \
             board/mediatek/mt6878/tetris_scp_security.o \
+            board/mediatek/mt6878/tetris_modem_layout.o \
             board/mediatek/mt6878/tetris_scp_prepare.o \
             board/mediatek/mt6878/tetris_scp_tcm.o \
             board/mediatek/mt6878/tetris_scp_secure.o \

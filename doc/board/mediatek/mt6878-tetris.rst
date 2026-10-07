@@ -169,3 +169,43 @@ policy, active-slot selection, full member-header semantics, authenticated
 CHECK_HEADER/memory layout, reservations, and ATF modem reset/protection
 ownership. A valid signature alone must not enable a modem DT node or publish
 a successful CCCI handoff.
+
+Relative modem load layout
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_plan_layout()`` bounds the initial ROM/DSP placement against a
+caller-supplied reservation capacity. It supports the observed release v6,
+MD1/type-14, DRDI-mode-3 profile only. The 512-byte footer must be inside the
+stored ROM; memory and logical-image sizes must be nonzero and bounded; DSP
+must fit its declared window without overlapping the stored ROM. Up to eight
+nonempty, nonoverlapping relative memory regions are checked with overflow-safe
+arithmetic. Errors leave the output unchanged. No allocation or copy occurs.
+
+This must be used after authenticating the complete immutable images. A
+successful plan is not a physical allocation or a complete modem memory map:
+padding reclamation, AP/MD remapping, shared memory and protection settings
+remain unresolved. In particular, ``md_img_size`` is not a safe source-read
+length and is kept separate from the actual stored ROM extent.
+
+The same pinned B4.1 LK payload described above provides these direct edges:
+
+* ``0x2483c..0x24968`` locates and checks the footer size/magic/version.
+* ``0x24198..0x241b4`` registers the DSP offset/size at footer ``+0xb8/+0xbc``;
+  ``0x2577c..0x257e8`` selects that region and loads DSP at base plus offset.
+* ``0x243d0..0x243e8`` publishes footer ``+0x190`` as ``drdi_version``.
+  ``0x2592c..0x25960`` retrieves it and skips the separate DRDI load when it
+  equals 3. The existence of ``md1drdi`` in the container does not override
+  this branch.
+* ``0x24108`` reads memory size at ``+0xac``; ``0x24120..0x24174`` consumes
+  region count at ``+0xc0`` and offset/size pairs at ``+0xc4``. The common
+  fields agree with Nothing device-modules commit
+  ``ee2be53cb75670b548948636a0db1d1ff112bf12``,
+  ``drivers/misc/mediatek/ccci_util/ccci_util_lib_main.h``.
+
+The archived B4.1 ROM has 55,396,432 stored bytes versus a 63,879,212-byte
+logical image declaration, four regions, and a 480 MiB memory requirement.
+DSP has 5,767,168 stored bytes in an 8,912,896-byte window at relative offset
+``0x1d780000``. These are evidence values, not constants in the planner.
+DRDI mode is 3. The logical/stored size difference is not attributed to a
+particular transformation without further evidence. Native bounds tests run
+only in CI; there is still no modem boot-path caller or SIM functionality.

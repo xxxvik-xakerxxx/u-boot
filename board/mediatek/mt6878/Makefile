@@ -7,6 +7,7 @@ obj-$(CONFIG_TETRIS_SCP_PREPARE_DIAGNOSTIC) += tetris_scp_prepare.o
 obj-$(CONFIG_TETRIS_SCP_TCM_DIAGNOSTIC) += tetris_scp_tcm.o
 obj-$(CONFIG_TETRIS_SCP_SECURE_DIAGNOSTIC) += tetris_scp_secure.o
 obj-$(CONFIG_TETRIS_SCP_SECURITY) += tetris_scp_security.o tetris_scp_fields.asn1.o
+obj-$(CONFIG_TETRIS_SCP_SECURITY) += tetris_modem_layout.o
 $(obj)/tetris_scp_security.o: $(obj)/tetris_scp_fields.asn1.h
 $(obj)/tetris_scp_fields.asn1.o: $(obj)/tetris_scp_fields.asn1.c $(obj)/tetris_scp_fields.asn1.h
 ccflags-$(CONFIG_TETRIS_SCP_SECURITY) += -I$(obj)
