@@ -337,9 +337,16 @@ from Linux's usable RAM until the next boot.
 
 Native libfdt tests cover allocation failures, address bounds, existing
 reservations, duplicates and every FDT slack size from 0 to 255 bytes.
-CI also cross-compiles the enabled board path. Hardware validation is still
-pending: verify the Linux carveout, USB/SSH and existing sensors/display
-before connecting any firmware loader or secure-monitor transport. For the
+CI also cross-compiles the enabled board path. Explicit CI ``37643162425``
+at ``fef0154b0404`` passed and was installed to slot A with all three SCP
+inputs. First warm and cold boots on r168 confirmed the 512 MiB no-map and
+memreserve entries, Linux exclusion and USB/SSH availability. The cold boot
+automatically started 24 sensor records (physical mask 31) at 15.52 seconds;
+SensorProxy followed at 15.86 seconds and delivered 21-23 lux updates.
+The warm SCP handoff limitation remains. This is one unit and one cold boot,
+not completed lifecycle validation. Visual regression, repeated cold starts
+and other variants remain unverified. Do not connect firmware loading or
+secure-monitor transport based on reservation success alone. For the
 currently installed sensor stack, retain all three explicit SCP CI inputs;
 the ordinary default CI artifact is not its replacement.
 
