@@ -36,6 +36,25 @@ int tetris_modem_authenticate_bundle(const void *container, size_t size,
 				     size_t reserved_capacity,
 				     struct tetris_modem_bundle *bundle);
 
+struct tetris_modem_prepared_bundle {
+	struct tetris_modem_bundle bundle;
+	struct tetris_modem_smem_inputs smem_inputs;
+	struct tetris_modem_smem_plan smem;
+};
+
+/*
+ * Authenticate ROM/DRDI/DSP, validate the load layout, then derive shared-memory
+ * service placements from the signed ROM header. ccb_gear is effective boot
+ * policy, resolved by the caller. Output must not alias immutable container.
+ * No reservation, copy, protection, remap, reset release or DT publication.
+ * B4.1 kernel mapping must cover alignment gaps before these tables are used.
+ */
+int tetris_modem_prepare_bundle_b41(const void *container, size_t size,
+				    const unsigned char root_pin[32],
+				    const struct tetris_scp_security_ops *ops,
+				    size_t reserved_capacity, unsigned int ccb_gear,
+				    struct tetris_modem_prepared_bundle *prepared);
+
 /*
  * Authenticate the complete supported bundle before copying ROM and DSP into
  * caller-owned, mapped destination RAM. DRDI mode 3 is authenticated but not

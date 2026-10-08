@@ -136,6 +136,34 @@ static int overlaps(const void *a, size_t a_size, const void *b, size_t b_size)
 	return first < second + b_size && second < first + a_size;
 }
 
+int tetris_modem_prepare_bundle_b41(const void *container, size_t size,
+				    const unsigned char root_pin[32],
+				    const struct tetris_scp_security_ops *ops,
+				    size_t reserved_capacity, unsigned int ccb_gear,
+				    struct tetris_modem_prepared_bundle *prepared)
+{
+	struct tetris_modem_prepared_bundle out;
+	const unsigned char *data = container;
+	int ret;
+
+	if (!valid_span(container, size) || !valid_span(prepared, sizeof(*prepared)) ||
+	    overlaps(container, size, prepared, sizeof(*prepared)))
+		return -EINVAL;
+	ret = tetris_modem_authenticate_bundle(container, size, root_pin, ops,
+					       reserved_capacity, &out.bundle);
+	if (ret)
+		return ret;
+	ret = tetris_modem_plan_smem_rom_b41(data + out.bundle.members[0].payload_offset,
+					     out.bundle.members[0].payload_size,
+					     out.bundle.members[2].payload_size,
+					     reserved_capacity, ccb_gear,
+					     &out.smem_inputs, &out.smem);
+	if (ret)
+		return ret;
+	*prepared = out;
+	return 0;
+}
+
 int tetris_modem_place_bundle(const void *container, size_t size,
 		const unsigned char root_pin[32],
 		const struct tetris_scp_security_ops *ops,

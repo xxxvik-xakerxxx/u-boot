@@ -102,6 +102,18 @@ int tetris_modem_plan_smem_b41(const struct tetris_modem_smem_inputs *inputs,
 			       struct tetris_modem_smem_plan *plan);
 
 /*
+ * Read v6 CHECK_HEADER shared-memory fields and compute the B4.1 plan.
+ * Caller authenticates immutable ROM/DSP before calling; this checks layout
+ * and metadata semantics only. Gear is caller-resolved boot policy, not a ROM
+ * field. Both outputs remain unchanged on failure and must not overlap.
+ */
+int tetris_modem_plan_smem_rom_b41(const void *rom, size_t rom_size,
+				   size_t dsp_size, size_t reserved_capacity,
+				   unsigned int ccb_gear,
+				   struct tetris_modem_smem_inputs *inputs,
+				   struct tetris_modem_smem_plan *plan);
+
+/*
  * Encode already resolved, ordered shared-memory placements as LK's 40-byte
  * runtime rows, inserting explicit padding for gaps. Returns byte count.
  * Caller supplies owned AP reservation and independently established MD view;

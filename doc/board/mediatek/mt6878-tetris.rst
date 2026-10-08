@@ -446,6 +446,39 @@ The caller must still establish the exact firmware/profile, obtain metadata,
 reserve and initialize RAM, apply/read back protection and remapping, and own
 the boot/reset sequence. This planner is not yet connected to automatic boot.
 
+Signed ROM service metadata
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_prepare_bundle_b41()`` authenticates all three image groups,
+validates the load layout and derives the service plan from the signed v6 ROM
+check header. It returns one prepared bundle with both the authenticated member
+offsets and the shared-memory inputs/plan. Errors publish no partial result.
+Gear remains explicit caller boot policy; it is not copied from firmware.
+
+``tetris_modem_plan_smem_rom_b41()`` reads CONSYS size at ``+0x180``, UDC enable
+at ``+0x184``, NVRAM cache size at ``+0x18c`` and DRDI version at ``+0x190``.
+Evidence is actual LK tag publication ``0x24370..0x243e8``. The private-image
+oracle can run this exact code with ``test-lk-smem-plan.py --modem``. The checked
+local modem container hash is
+``b15207a948125439a5957224d65774d9d44c558c6eb285372a520b27b8d7d6c5``;
+offline signature consistency passed, using image-derived trust only for that
+comparison, not as device root provisioning.
+
+Observed metadata is DRDI 3, UDC 0, CONSYS ``0xd80000`` and NVRAM ``0x16a040``.
+With effective gear 1, the cache profile has a ``0x15fc0`` padding gap before
+CCB, six runtime rows and capacity ``0x2560000``. The oracle now contains
+42 parameter combinations / 84 executed bank plans. Synthetic signed-bundle
+tests cover these field values, signed unsupported metadata, tampering,
+unknown gears, wrong trust and output aliasing. New native CI is pending.
+
+This gap exceeds the old consumer's page-rounding allowance. pmOS r173 adds
+``0173-vendor-ccci-smem-map-span.patch.vendor`` to map the full contiguous
+physical/offset span including padding. The current legacy CCCI observation
+validator still rejects this large gap; a future publishing boot caller must
+establish the span-mapping consumer contract before exposing these tables.
+Preparation does not yet reserve RAM, place images, apply protection, release
+reset or advertise modem readiness.
+
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

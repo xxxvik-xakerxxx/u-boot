@@ -136,7 +136,7 @@ class SmemPlanningTest(unittest.TestCase):
         oracle = json.loads(Path(__file__).with_name("tetris_smem_b41.json").read_text())
         self.assertEqual(oracle["lk_sha256"],
                          "29669b7a19dcb75b410cd8e35376c98892c0629cefd9eff7a5b01022f5667a1f")
-        self.assertEqual(len(oracle["cases"]), 28)
+        self.assertEqual(len(oracle["cases"]), 42)
         for case in oracle["cases"]:
             with self.subTest(inputs=case["inputs"]):
                 inputs, output = SmemInputs(*case["inputs"]), SmemPlan()

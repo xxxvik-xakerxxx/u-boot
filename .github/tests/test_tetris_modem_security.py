@@ -19,6 +19,7 @@ stage_native = None
 place_native = None
 load_native = None
 sync_native = None
+prepare_native = None
 Flush = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_ulong, c.c_ulong)
 
 
@@ -56,6 +57,25 @@ class Bundle(c.Structure):
                 ("layout", Layout)]
 
 
+class SmemInputs(c.Structure):
+    _fields_ = [(name, c.c_uint) for name in (
+        "drdi_version", "udc_en", "consys_size", "nv_cache_size", "ccb_gear")]
+
+
+class SmemEntry(c.Structure):
+    _fields_ = [(name, c.c_uint) for name in ("id", "offset", "size", "flags")]
+
+
+class SmemPlan(c.Structure):
+    _fields_ = [("nc", SmemEntry * 18), ("cache", SmemEntry * 5)]
+    _fields_ += [(name, c.c_uint) for name in (
+        "nc_capacity", "cache_capacity", "nc_rows", "cache_rows")]
+
+
+class PreparedBundle(c.Structure):
+    _fields_ = [("bundle", Bundle), ("inputs", SmemInputs), ("smem", SmemPlan)]
+
+
 if len(sys.argv) > 1 and sys.argv[1].endswith(".so"):
     library = c.CDLL(sys.argv.pop(1))
     Hash = c.CFUNCTYPE(None, c.c_void_p, c.c_size_t, c.c_void_p)
@@ -88,6 +108,11 @@ if len(sys.argv) > 1 and sys.argv[1].endswith(".so"):
     bundle_native.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p,
                               c.POINTER(Ops), c.c_size_t, c.POINTER(Bundle)]
     bundle_native.restype = c.c_int
+    prepare_native = library.tetris_modem_prepare_bundle_b41
+    prepare_native.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p,
+                               c.POINTER(Ops), c.c_size_t, c.c_uint,
+                               c.POINTER(PreparedBundle)]
+    prepare_native.restype = c.c_int
     storage_native = library.tetris_modem_read_bundle
     storage_native.argtypes = [c.POINTER(Storage), c.c_void_p, c.c_size_t,
                                c.c_void_p, c.POINTER(Ops), c.c_size_t,
@@ -183,13 +208,15 @@ class ModemSecurityTest(unittest.TestCase):
     def section(self, name, value):
         return self.member_header(name, len(value)) + value + bytes((-len(value)) % 16)
 
-    def signed_groups(self, bad_layout=False):
+    def signed_groups(self, bad_layout=False, smem_fields=None):
         rom = bytearray(1024)
         rom[512:524] = b"CHECK_HEADER"
         for offset, value in ((12, 6), (16, 2), (20, 14), (168, 1),
                               (172, 0x4000), (176, 0x2000), (184, 0x3000),
                               (188, 0x1000), (192, 2), (196, 0), (200, 0x3000),
                               (204, 0x3000), (208, 0x1000), (0x190, 3), (508, 512)):
+            struct.pack_into("<I", rom, 512 + offset, value)
+        for offset, value in (smem_fields or {}).items():
             struct.pack_into("<I", rom, 512 + offset, value)
         if bad_layout:
             struct.pack_into("<I", rom, 512 + 184, 16)  # Signed ROM/DSP overlap.
@@ -221,6 +248,42 @@ class ModemSecurityTest(unittest.TestCase):
     def test_bundle_reference_signatures(self):
         for parts in modem.components(b"".join(self.signed_groups())).values():
             self.assertTrue(self.accepted(parts))
+
+    @unittest.skipUnless(prepare_native, "authenticated service plan executes in CI")
+    def test_authenticated_service_plan(self):
+        # Actual stock field values, synthetic firmware and test signatures.
+        fields = {0x180: 0xd80000, 0x184: 0, 0x18c: 0x16a040, 0x190: 3}
+        data = b"".join(self.signed_groups(smem_fields=fields))
+        pin = bytes.fromhex(self.fixture.root_pin)
+        out = PreparedBundle()
+        self.assertEqual(prepare_native(data, len(data), pin, c.byref(ops),
+                                        0x4000, 1, c.byref(out)), 0)
+        self.assertEqual((out.inputs.drdi_version, out.inputs.udc_en,
+                          out.inputs.consys_size, out.inputs.nv_cache_size,
+                          out.inputs.ccb_gear), (3, 0, 0xd80000, 0x16a040, 1))
+        self.assertEqual(out.smem.cache[1].size, fields[0x18c])
+        self.assertEqual(out.smem.cache[2].offset, 0xf00000)
+        self.assertEqual(out.smem.cache_rows, 6)
+        self.assertEqual(out.smem.cache_capacity, 0x2560000)
+        self.assertEqual(out.bundle.layout.rom_size, 1024)
+
+        changed = bytearray(data)
+        changed[out.bundle.members[0].payload_offset + 512 + 0x180] ^= 1
+        invalid = [bytes(changed)]
+        invalid += [b"".join(self.signed_groups(smem_fields={0x184: 2})),
+                    b"".join(self.signed_groups(smem_fields={0x180: 0xffffffff})),
+                    b"".join(self.signed_groups(bad_layout=True))]
+        for value, gear, root in [(v, 1, pin) for v in invalid] + [
+                (data, 16, pin), (data, 1, bytes(32))]:
+            c.memset(c.byref(out), 0xa5, c.sizeof(out))
+            before = bytes(out)
+            self.assertLess(prepare_native(value, len(value), root, c.byref(ops),
+                                           0x4000, gear, c.byref(out)), 0)
+            self.assertEqual(bytes(out), before)
+        backing = c.create_string_buffer(data)
+        self.assertLess(prepare_native(backing, len(data), pin, c.byref(ops),
+                                       0x4000, 1, c.cast(backing, c.POINTER(PreparedBundle))), 0)
+        self.assertEqual(backing.raw[:-1], data)
 
     @unittest.skipUnless(sync_native, "native cache synchronization executes only in CI")
     def test_cache_ranges_and_first_failure(self):

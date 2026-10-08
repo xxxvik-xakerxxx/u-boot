@@ -304,6 +304,41 @@ int tetris_modem_plan_smem_b41(const struct tetris_modem_smem_inputs *inputs,
 	return 0;
 }
 
+int tetris_modem_plan_smem_rom_b41(const void *rom, size_t rom_size,
+				   size_t dsp_size, size_t reserved_capacity,
+				   unsigned int ccb_gear,
+				   struct tetris_modem_smem_inputs *inputs,
+				   struct tetris_modem_smem_plan *plan)
+{
+	struct tetris_modem_smem_inputs metadata;
+	struct tetris_modem_smem_plan out;
+	struct tetris_modem_layout layout;
+	const unsigned char *header;
+	int ret;
+
+	if (!inputs || !plan ||
+	    buffer_overlap(inputs, sizeof(*inputs), plan, sizeof(*plan)) ||
+	    buffer_overlap(rom, rom_size, inputs, sizeof(*inputs)) ||
+	    buffer_overlap(rom, rom_size, plan, sizeof(*plan)))
+		return -EINVAL;
+	ret = tetris_modem_plan_layout(rom, rom_size, dsp_size, reserved_capacity, &layout);
+	if (ret)
+		return ret;
+	header = (const unsigned char *)rom + rom_size - CHECK_SIZE;
+	/* LK 0x24370..0x243e8 publishes these v6 fields as four-byte tags. */
+	metadata.consys_size = word(header + 0x180);
+	metadata.udc_en = word(header + 0x184);
+	metadata.nv_cache_size = word(header + 0x18c);
+	metadata.drdi_version = word(header + 0x190);
+	metadata.ccb_gear = ccb_gear;
+	ret = tetris_modem_plan_smem_b41(&metadata, &out);
+	if (ret)
+		return ret;
+	*inputs = metadata;
+	*plan = out;
+	return 0;
+}
+
 static void put_smem(unsigned char *out, unsigned long long base,
 		     unsigned int id, unsigned int offset, unsigned int size,
 		     unsigned int flags, unsigned int md_offset)
