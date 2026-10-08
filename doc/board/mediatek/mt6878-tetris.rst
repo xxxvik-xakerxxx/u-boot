@@ -451,7 +451,16 @@ its 512-byte-header-plus-payload file instead hashes to
 These identify the same input at different container boundaries, not two
 firmware versions. Payload offsets below refer only to this audited input.
 
-The SMC table at ``0x58bc8`` selects ``0xbe28`` for ``0xc200040b``. Commands
+Correction, 2026-10-08: table entry ``0x58ba8`` selects ``0xbe28`` for
+``0xc2000505`` (KERNEL_CCCI_CONTROL). Entry ``0x58bc8`` instead selects
+``0x20d90`` for ``0xc200040b`` (LK_CCCI_CONTROL), a different descriptor
+interface. The prior code incorrectly combined the LK function ID with the
+kernel handler's reply ABI. The candidate and its tests now use ``0xc2000505``;
+boot-stage access policy remains unverified and no production call is enabled.
+The pinned LK really requests ``0xc200040b`` at ``0x27818..0x27820``. This
+LK/ATF interface discrepancy must be resolved, not hidden by assuming identical
+semantics or by asserting that a different function ID is usable from U-Boot.
+For the kernel handler, commands
 1/2 reach ``0x1bbe0``/``0x1bcf0``; both reject bases outside the reported DRAM
 with ``-7``. They do not check alignment or the full window. The dispatcher
 can return ``-15`` after its lock is set. Command 1 returns zero and three
@@ -611,11 +620,13 @@ ATF command 0 enters ``0x2f618``. ``0x10300`` masks both input page numbers to
 returns ``-4``. Invalid range/slot errors return ``-3``. These slots must not
 be retried after an attempted configuration without establishing fresh state.
 
-Command 2 subcommands 0/1 read back start/end; subcommand 3 reads enable state.
+The separate EMIDBG interface ``0x8200050b`` / ``0xc200050b`` selects handler
+``0x2f750`` through table entry ``0x58e68``. On THIS interface, command 2
+subcommands 0/1 read back start/end; subcommand 3 reads enable state.
 The end getter includes register bit 31 shifted into returned bit 43. The
 encoder supplies the exact expected raw readbacks, preserving this distinction
 from an address. Bounds and enabled-state readback do not prove permissions.
-Command 6 accepts only slot 40 and preset 0..3 for this ATF; other requests
+EMIDBG command 6 accepts only slot 40 and preset 0..3 for this ATF; other requests
 return ``-4``. Preset application, table ownership and the complete protection
 transaction remain separate prerequisites; no runtime boot caller is enabled.
 
@@ -625,5 +636,9 @@ pinned handler in Unicorn 2.1.4 with synthetic memory and emulated registers.
 address truncation and the four allowed presets with zero/preexisting bits.
 The preset writer ORs rights into the selected readback, not a replacement
 policy; validating initial state is required. This is offline instruction
-evidence, not proof of hardware permission semantics. The private ATF image
+evidence, not proof of hardware permission semantics or boot-stage access.
+These command-2/6 results do not apply to BL_EMIMPU_CONTROL: its dispatcher
+rejects both. The test now checks the SIP entry ID, name and handler before
+execution, rather than starting at an unqualified function offset.
+The private ATF image
 is hash-checked locally and is not distributed in CI.

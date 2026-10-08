@@ -107,6 +107,19 @@ def main():
     parser.add_argument("--lk", required=True)
     args = parser.parse_args()
     atf, lk = payload(args.atf, ATF_HASH), payload(args.lk, LK_HASH)
+    interfaces = []
+    for offset, expected_id, expected_name, expected_handler in (
+        (0x58BA8, 0x82000505, b"MTK_SIP_KERNEL_CCCI_CONTROL", 0xBE28),
+        (0x58BC8, 0x8200040B, b"MTK_SIP_LK_CCCI_CONTROL", 0x20D90),
+        (0x58E68, 0x8200050B, b"MTK_SIP_EMIDBG_CONTROL", 0x2F750),
+        (0x58E88, 0x82000415, b"MTK_SIP_BL_EMIMPU_CONTROL", 0x308AC),
+    ):
+        low, high, label, _, entry = struct.unpack_from("<IIQQQ", atf, offset)
+        assert low == expected_id and high == expected_id | 0x40000000
+        assert entry == BASE + expected_handler
+        assert atf[label - BASE:].split(b"\0", 1)[0] == expected_name
+        interfaces.append({"smc32": hex(low), "smc64": hex(high),
+                           "name": expected_name.decode(), "handler": hex(expected_handler)})
     smc32, smc64, name, _, handler = struct.unpack_from("<IIQQQ", atf, 0x58E88)
     assert (smc32, smc64, handler) == (0x82000415, 0xC2000415, BASE + ENTRY)
     assert atf[name - BASE:].split(b"\0", 1)[0] == b"MTK_SIP_BL_EMIMPU_CONTROL"
@@ -153,6 +166,7 @@ def main():
     ranges = audit_range_handler(atf)
     print(json.dumps({"atf_sha256": ATF_HASH, "lk_sha256": LK_HASH,
                       "result": "PASS", "dispatch": results,
+                      "interfaces": interfaces,
                       "range_handler": ranges,
                       "scope": "offline dispatch and range handler; synthetic BSS/MMIO only",
                       "lk_operation_6_return": "ignored before operation 0"}, indent=2))

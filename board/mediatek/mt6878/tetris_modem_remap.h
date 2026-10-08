@@ -25,6 +25,9 @@ struct tetris_modem_remap_ops {
  * Caller must first authenticate the firmware/platform, hold the modem in
  * reset and exclusively reserve the entire window. DRAM bounds alone do not
  * prove ownership. No production SMC adapter or boot caller is installed.
+ * The audited reply ABI belongs to KERNEL_CCCI_CONTROL (0xc2000505), not
+ * LK_CCCI_CONTROL (0xc200040b). Boot-stage access policy is still unverified;
+ * this helper must not be wired to boot by merely copying LK's function ID.
  * Keep one zero-initialized transaction for the lifetime of that reservation:
  * any attempted call consumes it, including transport/readback failures.
  * Never clear/retry it to recover partially programmed hardware.
