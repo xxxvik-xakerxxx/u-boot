@@ -799,6 +799,18 @@ static int tetris_ccci_validate_smem_layout(const void *fdt,
 	return 0;
 }
 
+static bool tetris_ccci_smem_mapping_allowed(const void *fdt,
+					     const struct tetris_ccci_access *access,
+					     u64 base, u32 bytes, u32 span)
+{
+	u64 rounded = ((u64)bytes + 0xfff) & ~0xfffULL;
+
+	/* B4.1's mapper masks the base and rounds size to kernel pages (4 KiB). */
+	return bytes && !(base & 0xfff) && rounded <= UINT32_MAX &&
+	       span <= rounded &&
+	       tetris_ccci_payload_range_allowed(fdt, access, base, rounded);
+}
+
 static int tetris_ccci_validate_smem_table(const void *fdt,
 					   const struct tetris_ccci_access *access,
 					   const struct tetris_ccci_tag_data *count_tag,
@@ -808,6 +820,7 @@ static int tetris_ccci_validate_smem_table(const void *fdt,
 	u32 count = get_unaligned_le32(count_tag->data);
 	u64 origin = 0, first_base = 0;
 	u32 first_offset = 0, cursor = 0, mapped_offset = 0, mapped_size = 0;
+	u32 mapped_end = 0;
 	bool mapping = false, populated = false;
 	unsigned int i, j;
 
@@ -850,7 +863,10 @@ static int tetris_ccci_validate_smem_table(const void *fdt,
 		/* B4.1 skips padding, then maps the sum of each ordinary run. */
 		if (!padding) {
 			if (flags & BIT(3)) {
-				if (mapping && !mapped_size)
+				if (mapping &&
+				    !tetris_ccci_smem_mapping_allowed(fdt, access,
+					origin + mapped_offset, mapped_size,
+					mapped_end - mapped_offset))
 					goto bad_range;
 				mapping = false;
 			} else {
@@ -859,9 +875,8 @@ static int tetris_ccci_validate_smem_table(const void *fdt,
 					mapped_size = 0;
 					mapping = true;
 				}
-				if (offset - mapped_offset != mapped_size)
-					goto bad_range;
 				mapped_size += size;
+				mapped_end = offset + size;
 			}
 		}
 
@@ -883,7 +898,9 @@ static int tetris_ccci_validate_smem_table(const void *fdt,
 		}
 	}
 	/* Also bounds zero-size rows, including a one-past-end final entry. */
-	if (!populated || (mapping && !mapped_size) ||
+	if (!populated ||
+	    (mapping && !tetris_ccci_smem_mapping_allowed(fdt, access,
+			origin + mapped_offset, mapped_size, mapped_end - mapped_offset)) ||
 	    !tetris_ccci_payload_range_allowed(fdt, access, first_base,
 					      cursor - first_offset))
 		goto bad_range;

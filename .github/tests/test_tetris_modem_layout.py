@@ -3,6 +3,7 @@
 """CI-only execution of the native relative modem layout planner."""
 import ctypes as c
 import errno
+import json
 import os
 from pathlib import Path
 import struct
@@ -112,6 +113,65 @@ class TagEncodingTest(unittest.TestCase):
 
 class SmemEntry(c.Structure):
     _fields_ = [(name, c.c_uint) for name in ("id", "offset", "size", "flags")]
+
+
+class SmemInputs(c.Structure):
+    _fields_ = [(name, c.c_uint) for name in (
+        "drdi_version", "udc_en", "consys_size", "nv_cache_size", "ccb_gear")]
+
+
+class SmemPlan(c.Structure):
+    _fields_ = [("nc", SmemEntry * 18), ("cache", SmemEntry * 5)]
+    _fields_ += [(name, c.c_uint) for name in (
+        "nc_capacity", "cache_capacity", "nc_rows", "cache_rows")]
+
+
+plan_smem = library.tetris_modem_plan_smem_b41
+plan_smem.argtypes = [c.POINTER(SmemInputs), c.POINTER(SmemPlan)]
+plan_smem.restype = c.c_int
+
+
+class SmemPlanningTest(unittest.TestCase):
+    def test_lk_oracle(self):
+        oracle = json.loads(Path(__file__).with_name("tetris_smem_b41.json").read_text())
+        self.assertEqual(oracle["lk_sha256"],
+                         "29669b7a19dcb75b410cd8e35376c98892c0629cefd9eff7a5b01022f5667a1f")
+        self.assertEqual(len(oracle["cases"]), 28)
+        for case in oracle["cases"]:
+            with self.subTest(inputs=case["inputs"]):
+                inputs, output = SmemInputs(*case["inputs"]), SmemPlan()
+                self.assertEqual(plan_smem(c.byref(inputs), c.byref(output)), 0)
+                for bank in ("nc", "cache"):
+                    rows = getattr(output, bank)
+                    self.assertEqual([[r.id, r.offset, r.size, r.flags] for r in rows],
+                                     case[bank]["entries"])
+                    capacity = getattr(output, bank + "_capacity")
+                    count = getattr(output, bank + "_rows")
+                    self.assertEqual(capacity, case[bank]["capacity"])
+                    self.assertEqual(count, case[bank]["rows"])
+                    wire = c.create_string_buffer(count * 40)
+                    self.assertEqual(encode_smem(rows, len(rows), 0x88000000,
+                                                capacity, 0, wire, len(wire)), count * 40)
+
+    def test_atomic_failures(self):
+        for values in ((2, 0, 0, 0, 1), (3, 2, 0, 0, 1),
+                       (3, 0, 0, 0, 5), (3, 0, 0, 0, 16),
+                       (3, 0, 0xffffffff, 0, 1), (3, 0, 0, 0xffffffff, 1),
+                       (3, 0, 0x2b00000, 0, 13)):
+            inputs, output = SmemInputs(*values), SmemPlan()
+            c.memset(c.byref(output), 0xa5, c.sizeof(output))
+            before = bytes(output)
+            self.assertLess(plan_smem(c.byref(inputs), c.byref(output)), 0)
+            self.assertEqual(bytes(output), before)
+        output = SmemPlan()
+        self.assertEqual(plan_smem(None, c.byref(output)), -errno.EINVAL)
+        self.assertEqual(plan_smem(c.byref(SmemInputs()), None), -errno.EINVAL)
+
+    def test_largest_gear_that_fits(self):
+        inputs, output = SmemInputs(3, 1, 0x100000, 0, 13), SmemPlan()
+        self.assertEqual(plan_smem(c.byref(inputs), c.byref(output)), 0)
+        self.assertEqual(output.cache[2].size, 0x6000000)
+        self.assertLessEqual(output.cache_capacity, 0x8000000)
 
 
 encode_smem = library.tetris_modem_encode_smem

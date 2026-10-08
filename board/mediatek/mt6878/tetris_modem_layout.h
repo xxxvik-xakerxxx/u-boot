@@ -72,6 +72,35 @@ struct tetris_modem_smem_entry {
 	unsigned int flags;
 };
 
+struct tetris_modem_smem_inputs {
+	unsigned int drdi_version;
+	unsigned int udc_en;
+	unsigned int consys_size;
+	unsigned int nv_cache_size;
+	unsigned int ccb_gear;
+};
+
+struct tetris_modem_smem_plan {
+	struct tetris_modem_smem_entry nc[18];
+	struct tetris_modem_smem_entry cache[5];
+	unsigned int nc_capacity;
+	unsigned int cache_capacity;
+	unsigned int nc_rows;
+	unsigned int cache_rows;
+};
+
+/*
+ * B4.1 service profile, after authenticated metadata/boot-policy resolution.
+ * The caller must establish this exact LK profile; no automatic selection.
+ * ccb_gear is the effective gear (including any boot-mode override); zero
+ * selects LK's default gear 1. Supports DRDI 3 only, like the image planner.
+ * Computes relative placements, padding row counts and 64 KiB reservations.
+ * Does not allocate RAM or establish Linux mapping compatibility/readiness.
+ * Unknown gears and overflowing/oversized banks fail without changing output.
+ */
+int tetris_modem_plan_smem_b41(const struct tetris_modem_smem_inputs *inputs,
+			       struct tetris_modem_smem_plan *plan);
+
 /*
  * Encode already resolved, ordered shared-memory placements as LK's 40-byte
  * runtime rows, inserting explicit padding for gaps. Returns byte count.

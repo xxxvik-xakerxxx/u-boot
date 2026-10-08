@@ -855,6 +855,52 @@ static void test_smem_mapping(void)
 		       "NC and cache regions cannot share a real ID");
 }
 
+static void test_b41_smem_plan(void)
+{
+	struct fixture fixture;
+	struct tetris_ccci_access access = {
+		.range_allowed = fixture_range_allowed,
+		.context = &fixture,
+	};
+	struct tetris_modem_smem_inputs inputs = { 3, 0, 0, 0x100000, 3 };
+	struct tetris_modem_smem_plan plan;
+	struct tetris_ccci_result result = { 0 };
+	u8 rows[19 * 40], count[4];
+	struct tetris_ccci_tag_data count_tag = { count, sizeof(count) };
+	struct tetris_ccci_tag_data layout = { rows, 0 };
+	int bytes;
+
+	fixture_init(&fixture, true, false);
+	require(!tetris_modem_plan_smem_b41(&inputs, &plan), "plan B4.1 service banks");
+	bytes = tetris_modem_encode_smem(plan.nc, ARRAY_SIZE(plan.nc), TEST_SMEM_BASE,
+					 plan.nc_capacity, 0, rows, sizeof(rows));
+	require(bytes == 19 * 40, "NC plan includes LK alignment padding");
+	layout.size = bytes;
+	put_le32(count, plan.nc_rows);
+	require(!tetris_ccci_validate_smem_table(fixture.fdt, &access, &count_tag,
+						 &layout, &result),
+		"real NC plan fits page-rounded consumer mapping");
+	/* A non-page-aligned base would be silently rounded down by Linux. */
+	put_le64(rows, TEST_SMEM_BASE + 64);
+	require(tetris_ccci_validate_smem_table(fixture.fdt, &access, &count_tag,
+						&layout, &result) < 0,
+		"misaligned mapping base rejected");
+	bytes = tetris_modem_encode_smem(plan.cache, ARRAY_SIZE(plan.cache), TEST_SMEM_BASE,
+					 plan.cache_capacity, 0x8000000, rows, sizeof(rows));
+	require(bytes > 0, "encode cache bank with disabled optional regions");
+	layout.size = bytes;
+	put_le32(count, plan.cache_rows);
+	require(!tetris_ccci_validate_smem_table(fixture.fdt, &access, &count_tag,
+						 &layout, &result), "cache plan validates");
+	require(!tetris_ccci_smem_mapping_allowed(fixture.fdt, &access,
+						  TEST_MEMORY_BASE + TEST_MEMORY_SIZE - 0x1000,
+						  0x1001, 0x1001),
+		"rounded mapping must remain inside reserved DRAM");
+	require(!tetris_ccci_smem_mapping_allowed(fixture.fdt, &access,
+						  TEST_SMEM_BASE, 0xffffffff, 0xffffffff),
+		"mapping size wrap rejected");
+}
+
 static void test_encoded_tags(void)
 {
 	struct fixture fixture;
@@ -1076,6 +1122,7 @@ int main(void)
 	test_payload_failures();
 	test_encoded_tags();
 	test_smem_mapping();
+	test_b41_smem_plan();
 	test_publish_no_space();
 	test_tag_failures();
 	test_gnss_emi_handoff();

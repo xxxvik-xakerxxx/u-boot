@@ -414,12 +414,35 @@ or publish a ready handoff. Those remain integration gates.
 The validator now accepts repeated padding IDs and zero-size ordinary rows
 within a nonempty mapping run. It requires a contiguous physical/offset span
 inside reserved DRAM, unique non-padding IDs across NC/cache tables and known
-flags. It rejects empty mapping runs and padding gaps inside an ordinary run:
-the B4.1 consumer skips padding when summing mapping size, but uses offsets
-for virtual addresses. Leading padding and NO_MAP-separated gaps are supported.
+flags. It rejects empty mapping runs and gaps that exceed the page-rounded
+mapping: B4.1 sums sizes without padding but rounds the mapping to pages.
+The 4 KiB consumer profile requires page-aligned starts, reserved coverage of
+the rounded mapping and coverage of every ordinary row through its end.
+The real NC table's 2 KiB gap fits this rounding; a full-page hole does not.
 These are conservative producer-profile restrictions, not a claim to accept
 every stock table. New producer-to-validator regression tests run in CI;
 no ready handoff or hardware support is enabled by these checks.
+
+``tetris_modem_plan_smem_b41()`` now resolves all 18 NC and 5 cache service
+placements for the audited LK profile. Inputs are authenticated ``drdi_version``,
+``udc_en``, ``consys_size``, ``nv_cache_shm_size`` and the effective CCB gear
+after boot-policy resolution. DRDI 3 only is supported; unsupported gears fail
+instead of inheriting LK's silent disable fallback. The function computes
+alignment gaps, output row counts and 64 KiB-rounded capacities, bounded at
+160 MiB NC and 128 MiB cache, without allocating or touching hardware.
+
+Evidence: pinned LK tables ``0x198318``/``0x198558``, callbacks
+``0x21b1c..0x21fdc``, NC placement ``0x223cc..0x22568`` and cache placement
+``0x22a94..0x22bec``. The pmOS ``test-lk-smem-plan.py`` executes 56 bank plans
+using actual callbacks and placement instructions with synthetic tag/env
+responses. The generated 28-case oracle in ``.github/tests/tetris_smem_b41.json``
+contains only synthetic inputs/outputs, not firmware. CI compares every row,
+capacity and count against the C planner, and tests planner-to-encoder-to-CCCI
+validation including the real NC padding gap. New CI result is pending.
+
+The caller must still establish the exact firmware/profile, obtain metadata,
+reserve and initialize RAM, apply/read back protection and remapping, and own
+the boot/reset sequence. This planner is not yet connected to automatic boot.
 
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~
