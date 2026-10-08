@@ -451,16 +451,16 @@ its 512-byte-header-plus-payload file instead hashes to
 These identify the same input at different container boundaries, not two
 firmware versions. Payload offsets below refer only to this audited input.
 
-Correction, 2026-10-08: table entry ``0x58ba8`` selects ``0xbe28`` for
-``0xc2000505`` (KERNEL_CCCI_CONTROL). Entry ``0x58bc8`` instead selects
-``0x20d90`` for ``0xc200040b`` (LK_CCCI_CONTROL), a different descriptor
-interface. The prior code incorrectly combined the LK function ID with the
-kernel handler's reply ABI. The candidate and its tests now use ``0xc2000505``;
-boot-stage access policy remains unverified and no production call is enabled.
-The pinned LK really requests ``0xc200040b`` at ``0x27818..0x27820``. This
-LK/ATF interface discrepancy must be resolved, not hidden by assuming identical
-semantics or by asserting that a different function ID is usable from U-Boot.
-For the kernel handler, commands
+Correction, 2026-10-08: the SIP records start with the handler pointer, followed
+by the two FIDs, name pointer and writable index pointer (``<QIIQQ``).
+The prior ``<IIQQQ`` parse started eight bytes late and assigned each FID the
+NEXT record's handler. Registration at ``0x23cb0`` and indirect dispatch at
+``0x2382c`` independently establish the actual layout. Entry ``0x58bc0`` binds
+``0xc200040b`` (LK_CCCI_CONTROL) to ``0xbe28``, matching LK. The unenabled
+candidate again uses this ID. KERNEL_CCCI_CONTROL ``0xc2000505`` instead binds
+to ``0xbf2c`` at entry ``0x58ba0``. The earlier claimed mismatch was an audit
+error, not a firmware incompatibility.
+For the LK handler, commands
 1/2 reach ``0x1bbe0``/``0x1bcf0``; both reject bases outside the reported DRAM
 with ``-7``. They do not check alignment or the full window. The dispatcher
 can return ``-15`` after its lock is set. Command 1 returns zero and three
@@ -477,32 +477,40 @@ Staging success must not be reported as an applied MPU policy. CI tests cover
 every representable aligned nonzero remap window, DRAM endpoints, undersized
 reservations, unaligned/overflowing addresses and unchanged output on errors.
 
-LK/ATF EMI operation mismatch
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+LK/ATF EMI dispatch
+~~~~~~~~~~~~~~~~~~~
 
-Offline audit on 2026-10-08 found that copying the LK permission-selector
-call would be incorrect for the hash-pinned ATF above. LK ``0x818b8`` tests
+LK ``0x818b8`` tests
 row flag bit 1 and calls ``0x7ee38`` with slot and row ID. That helper requests
 ``0x82000415`` operation 6. At ``0x818c4`` the caller branches directly to
 range programming through ``0x7ef84``, without checking the operation-6 result.
 
-The ATF SIP table entry at ``0x58e88`` names
-``MTK_SIP_BL_EMIMPU_CONTROL`` and selects handler ``0x308ac`` (linked base
-``0x48800000``). It accepts operation 0, forwarding start/end pages and slot
-to ``0x2f618``, and operation 1, forwarding its argument to ``0x2ed24``.
-Other operations return -2, including operation 6. This is a dispatch result,
-not evidence that operation 0 establishes the complete modem permissions.
+Entry ``0x58e80`` binds BL_EMIMPU_CONTROL ``0x82000415`` / ``0xc2000415``
+to ``0x2f750``. This supports range, readback and restricted preset operations
+described below. The earlier claim that operation 6 always returns -2 was
+based on the adjacent TEE_EMI_MPU_CONTROL record (``0x58ea0``, ID
+``0x82000048``, handler ``0x308ac``). It does NOT describe the LK interface.
 
 Reproduce with ``tools/tetris-modem-emi-contract.py --atf PATH --lk PATH``
 using Python with Capstone and Unicorn. It verifies both payload hashes and
-the LK instructions. The dispatch check stops before either helper; a separate
+the LK instructions. Its internal TEE dispatch check stops before either helper; a separate
 range-handler check executes against synthetic zeroed BSS, stack and MMIO.
 Operations 0 through 15 and the all-ones dispatch input passed; no device SMC
 was issued. The tool requires local stock binaries, not redistributed in CI.
 
-Do not add an operation-6 success requirement or suppress its error as if
-permissions were installed. The next prerequisite is tracing operation 0's
-slot-specific policy and readback, not guessing missing permission masks.
+Do not suppress a preset error as if permissions were installed. Stock LK's
+ignored return is not sufficient validation for a new caller.
+
+``tools/tetris-sip-dispatch-contract.py ATF`` runs the real registration code
+and outer dispatcher, stopping BEFORE any subsystem handler. Its 64 cases
+cover both SMC conventions and synthetic caller/state combinations. For a
+non-secure caller and policy word ``0x5aea4 == 1``, state byte ``0xf796a == 0``
+routes LK CCCI and BL EMI, while state 1 routes kernel CCCI and EMIDBG.
+The opposite-stage IDs do not reach handlers. Policy word 0 reaches a rejection
+diagnostic; secure-caller cases do not reach these four handlers. These offsets
+are payload-relative, not phone-write instructions. No state is changed on
+hardware. This verifies conditional routing, not the actual boot-stage state
+on the phone or the complete modem protection policy.
 
 Range operation and recovery limits
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -620,13 +628,13 @@ ATF command 0 enters ``0x2f618``. ``0x10300`` masks both input page numbers to
 returns ``-4``. Invalid range/slot errors return ``-3``. These slots must not
 be retried after an attempted configuration without establishing fresh state.
 
-The separate EMIDBG interface ``0x8200050b`` / ``0xc200050b`` selects handler
-``0x2f750`` through table entry ``0x58e68``. On THIS interface, command 2
+BL_EMIMPU_CONTROL ``0x82000415`` / ``0xc2000415`` selects handler
+``0x2f750`` through table entry ``0x58e80``. On this interface, command 2
 subcommands 0/1 read back start/end; subcommand 3 reads enable state.
 The end getter includes register bit 31 shifted into returned bit 43. The
 encoder supplies the exact expected raw readbacks, preserving this distinction
 from an address. Bounds and enabled-state readback do not prove permissions.
-EMIDBG command 6 accepts only slot 40 and preset 0..3 for this ATF; other requests
+BL_EMIMPU command 6 accepts only slot 40 and preset 0..3 for this ATF; other requests
 return ``-4``. Preset application, table ownership and the complete protection
 transaction remain separate prerequisites; no runtime boot caller is enabled.
 

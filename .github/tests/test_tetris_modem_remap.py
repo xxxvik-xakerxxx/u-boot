@@ -58,7 +58,7 @@ class RemapTransactionTest(unittest.TestCase):
             self.assertEqual(len(calls), count, "a consumed transaction was retried")
         for context, function, operation, low, high in calls:
             self.assertEqual(context, 123)
-            self.assertEqual(function, 0xc2000505)
+            self.assertEqual(function, 0xc200040b)
             self.assertIn(operation, (1, 2))
             self.assertEqual(low | high << 32, base)
         return result, transaction, calls

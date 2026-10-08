@@ -39,8 +39,8 @@ int tetris_modem_program_remap(unsigned long long base,
 		/* Missing callback outputs must fail, not resemble a zero register. */
 		for (i = 0; i < 4; i++)
 			reply[i] = ~0ULL;
-		/* Audited ATF remap handler, not the distinct LK CCCI descriptor API. */
-		ret = ops->smc(ops->context, 0xc2000505U, operation,
+		/* LK CCCI remap ABI; the kernel CCCI interface is different. */
+		ret = ops->smc(ops->context, 0xc200040bU, operation,
 			       (unsigned int)base, (unsigned int)(base >> 32), reply);
 		if (ret)
 			goto failed;
