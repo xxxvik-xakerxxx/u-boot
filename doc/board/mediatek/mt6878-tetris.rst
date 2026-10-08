@@ -518,21 +518,47 @@ Checked range transaction
 ``tetris_modem_program_emi_range()`` provides the range-only BL_EMIMPU
 transaction with an injected transport, not a production SMC adapter or boot
 caller. It validates alignment, representability and containment in a
-caller-owned reservation before any callback. The sequence is disabled-state
-readback (operation 2/3), one range write (operation 0), then start, raw end
-and enabled-state readback (operation 2/0, 2/1, 2/3). Already enabled slots
+caller-owned reservation before any callback. An independently established
+expected policy is mandatory: eight 64-bit words packing two bits per domain
+selector, 32 selectors per word. It must NOT be learned from current readback.
+The sequence is disabled-state readback (operation 2/3), eight policy queries
+(operation 2/4), one range write (operation 0), then start, raw end and enabled
+readback (operation 2/0, 2/1, 2/3), and the same eight policy queries again.
+All 21 results must match; a pre-write policy mismatch prevents the write.
+Already enabled slots
 return ``-EBUSY`` without a write. Unexpected, missing or failed replies stop
 immediately; the first transport error is preserved. Any attempted callback
 consumes the transaction, including preflight reads. There is no disable,
 rollback or retry that could hide a partially configured one-shot slot.
 
-``RANGE_VERIFIED`` means exactly those readbacks matched, not that domain
-permissions are correct or the modem can boot. Independent reservation/slot
+``RANGE_VERIFIED`` means exactly those readbacks matched the caller's policy,
+not that the policy itself is correct or the modem can boot. Independent reservation/slot
 ownership, boot-stage admission, complete permission policy and hardware end
 semantics remain mandatory before integration. The private-image emulator
 checks the same read/write sequence; native CI tests inject faults at every
 step and every result bit, cover all twelve slots and addresses above 4 GiB,
 and require invalid inputs to leave the transaction unchanged without calls.
+Missing replies are poisoned with the complement of the expected value;
+all-zero and all-ones policy words are valid packed data, not error sentinels.
+
+Permission readback contract
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Pinned ATF query ``op=2, x2=4, x3=slot, x4=group`` reaches ``0x2f464`` through
+``0x2f510``. For slot 1..63 it reads the two-bit field at
+``0x103519e4 + 4*((slot-1)/16)``, shift ``2*((slot-1)%16)``, once for each
+selector ``32*group .. 32*group+31``. It writes only the selector at
+``0x103519bc`` and executes ``dsb sy`` before each read, packing results into
+x0 with the first selector in bits 1:0. It does not commit permissions.
+The transport must serialize access to this shared selector/read window.
+
+The private-image emulator covers all modem slots and groups 0..7 with
+deterministic, independently varied per-slot/selector data (96 cases). It
+checks the exact selector sequence and absence of permission/range writes.
+This establishes the packed readback ABI, not the domain names, implemented
+hardware domains or expected policy values. The full-width x0 is data, so
+an all-ones word cannot alone distinguish an unsupported SMC from a policy;
+the pinned interface and stage prerequisites must remain enforced.
 
 Range operation and recovery limits
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

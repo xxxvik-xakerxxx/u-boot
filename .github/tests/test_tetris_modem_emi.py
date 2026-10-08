@@ -9,7 +9,7 @@ import unittest
 
 class Transaction(c.Structure):
     _fields_ = [("state", c.c_uint), ("step", c.c_uint), ("slot", c.c_uint),
-                ("reply", c.c_ulonglong * 5)]
+                ("reply", c.c_ulonglong * 21)]
 
 
 Callback = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_uint, c.c_uint,
@@ -24,7 +24,7 @@ class Ops(c.Structure):
 library = c.CDLL(sys.argv.pop(1))
 program = library.tetris_modem_program_emi_range
 program.argtypes = [c.c_ulonglong, c.c_ulonglong, c.c_uint,
-                    c.c_ulonglong, c.c_ulonglong, c.POINTER(Ops),
+                    c.c_ulonglong, c.c_ulonglong, c.POINTER(c.c_ulonglong), c.POINTER(Ops),
                     c.POINTER(Transaction)]
 program.restype = c.c_int
 
@@ -32,9 +32,11 @@ program.restype = c.c_int
 class EmiTransactionTest(unittest.TestCase):
     def run_case(self, start=0x80000000, size=0x200000, slot=32,
                  base=0x80000000, capacity=0x20000000, state=0,
-                 corrupt=None, transport=None, missing=None):
+                 corrupt=None, transport=None, missing=None, policy=None):
         calls = []
-        values = [0, 0, start, (start + size) | (1 << 43), 1]
+        policy = list(policy) if policy is not None else [0x123456789abcdef0 ^ (i << 40) for i in range(8)]
+        policy_array = (c.c_ulonglong * 8)(*policy)
+        values = [0] + policy + [0, start, (start + size) | (1 << 43), 1] + policy
 
         def smc(context, fid, operation, a, b, d, output):
             step = len(calls)
@@ -46,17 +48,18 @@ class EmiTransactionTest(unittest.TestCase):
         cb = Callback(smc)
         ops = Ops(cb, 123)
         tx = Transaction(state=state)
-        ret = program(start, size, slot, base, capacity, c.byref(ops), c.byref(tx))
-        expected = [(123, 0xc2000415, 2, 3, slot, 0),
+        ret = program(start, size, slot, base, capacity, policy_array, c.byref(ops), c.byref(tx))
+        queries = [(123, 0xc2000415, 2, 4, slot, group) for group in range(8)]
+        expected = [(123, 0xc2000415, 2, 3, slot, 0)] + queries + [
                     (123, 0xc2000415, 0, start >> 12, (start + size) >> 12, slot),
                     (123, 0xc2000415, 2, 0, slot, 0),
                     (123, 0xc2000415, 2, 1, slot, 0),
-                    (123, 0xc2000415, 2, 3, slot, 0)]
+                    (123, 0xc2000415, 2, 3, slot, 0)] + queries
         self.assertEqual(calls, expected[:len(calls)])
         if tx.state:
             before, count = bytes(tx), len(calls)
             self.assertEqual(program(start, size, slot, base, capacity,
-                                     c.byref(ops), c.byref(tx)), -errno.EALREADY)
+                                     policy_array, c.byref(ops), c.byref(tx)), -errno.EALREADY)
             self.assertEqual(bytes(tx), before)
             self.assertEqual(len(calls), count)
         return ret, tx, calls
@@ -68,11 +71,12 @@ class EmiTransactionTest(unittest.TestCase):
                     ret, tx, calls = self.run_case(start=start, base=start,
                                                     size=4096, capacity=4096, slot=slot)
                     self.assertEqual(ret, 0)
-                    self.assertEqual((tx.state, tx.step, tx.slot), (2, 4, slot))
-                    self.assertEqual(len(calls), 5)
+                    self.assertEqual((tx.state, tx.step, tx.slot), (2, 20, slot))
+                    self.assertEqual(len(calls), 21)
 
     def test_every_result_is_checked(self):
-        values = [0, 0, 0x80000000, 0x80200000 | (1 << 43), 1]
+        policy = [0x123456789abcdef0 ^ (i << 40) for i in range(8)]
+        values = [0] + policy + [0, 0x80000000, 0x80200000 | (1 << 43), 1] + policy
         for step, value in enumerate(values):
             for bit in range(64):
                 with self.subTest(step=step, bit=bit):
@@ -87,7 +91,7 @@ class EmiTransactionTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_missing_and_transport_failures(self):
-        for step in range(5):
+        for step in range(21):
             for args in (dict(missing=step), dict(transport=(step, -errno.ETIMEDOUT)),
                          dict(transport=(step, 1)), dict(corrupt=(step, 2**64 - 4))):
                 with self.subTest(step=step, args=args):
@@ -118,9 +122,27 @@ class EmiTransactionTest(unittest.TestCase):
             self.assertEqual(tx.state, state)
             self.assertEqual(calls, [])
         tx, empty = Transaction(), Ops()
+        policy = (c.c_ulonglong * 8)()
         for ops, transaction in ((None, c.byref(tx)), (c.byref(empty), c.byref(tx)),
                                  (c.byref(empty), None)):
-            self.assertEqual(program(0, 0, 0, 0, 0, ops, transaction), -errno.EINVAL)
+            self.assertEqual(program(0, 0, 0, 0, 0, policy, ops, transaction), -errno.EINVAL)
+
+    def test_uniform_policies_and_missing_outputs(self):
+        for value in (0, 2**64 - 1):
+            self.assertEqual(self.run_case(policy=[value] * 8)[0], 0)
+            for step in (*range(1, 9), *range(13, 21)):
+                ret, tx, calls = self.run_case(policy=[value] * 8, missing=step)
+                self.assertLess(ret, 0)
+                self.assertEqual(len(calls), step + 1)
+
+    def test_policy_required_before_any_call(self):
+        calls = []
+        cb = Callback(lambda *args: calls.append(args) or 0)
+        ops, tx = Ops(cb, None), Transaction()
+        self.assertEqual(program(0x80000000, 4096, 32, 0x80000000, 4096,
+                                 None, c.byref(ops), c.byref(tx)), -errno.EINVAL)
+        self.assertEqual(calls, [])
+        self.assertEqual(bytes(tx), bytes(Transaction()))
 
 
 if __name__ == "__main__":

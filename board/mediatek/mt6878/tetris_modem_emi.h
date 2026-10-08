@@ -9,11 +9,14 @@ enum tetris_modem_emi_state {
 	TETRIS_MODEM_EMI_FAILED,
 };
 
+#define TETRIS_MODEM_EMI_POLICY_WORDS 8
+#define TETRIS_MODEM_EMI_STEPS 21
+
 struct tetris_modem_emi_transaction {
 	unsigned int state;
 	unsigned int step;
 	unsigned int slot;
-	unsigned long long reply[5];
+	unsigned long long reply[TETRIS_MODEM_EMI_STEPS];
 };
 
 struct tetris_modem_emi_ops {
@@ -24,7 +27,10 @@ struct tetris_modem_emi_ops {
 };
 
 /*
- * Range-only transaction for pinned BL_EMIMPU_CONTROL; no permission preset.
+ * Range transaction for pinned BL_EMIMPU_CONTROL; no permission preset writes.
+ * Policy is eight packed words, two bits per domain, supplied independently
+ * by a verified platform policy. Never learn/approve it from current readback.
+ * Compare all 256 domain fields before programming and again afterwards.
  * Caller owns the reservation AND slot, has authenticated the firmware/platform,
  * established the boot-stage/permission policy, and holds the modem in reset.
  * A disabled slot does not prove ownership or an unused ATF one-shot guard.
@@ -36,6 +42,7 @@ struct tetris_modem_emi_ops {
 int tetris_modem_program_emi_range(unsigned long long start,
 		unsigned long long size, unsigned int slot,
 		unsigned long long reserved_base, unsigned long long reserved_size,
+		const unsigned long long policy[TETRIS_MODEM_EMI_POLICY_WORDS],
 		const struct tetris_modem_emi_ops *ops,
 		struct tetris_modem_emi_transaction *transaction);
 
