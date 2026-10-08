@@ -204,6 +204,75 @@ static int buffer_overlap(const void *a, size_t a_size, const void *b, size_t b_
 	return first < second + b_size && second < first + a_size;
 }
 
+static void put_smem(unsigned char *out, unsigned long long base,
+		     unsigned int id, unsigned int offset, unsigned int size,
+		     unsigned int flags, unsigned int md_offset)
+{
+	unsigned long long physical = base + offset;
+
+	memset(out, 0, 40);
+	put_word(out, physical);
+	put_word(out + 4, physical >> 32);
+	put_word(out + 16, id);
+	put_word(out + 20, offset);
+	put_word(out + 24, size);
+	put_word(out + 32, flags);
+	put_word(out + 36, md_offset + offset);
+}
+
+int tetris_modem_encode_smem(const struct tetris_modem_smem_entry *entries,
+			    size_t count, unsigned long long base, size_t capacity,
+			    unsigned int md_offset, void *buffer, size_t size)
+{
+	unsigned char *out = buffer;
+	size_t i, j, rows = count;
+	unsigned int cursor = 0;
+
+	if (!entries || !buffer || !count || count > 128 ||
+	    (size_t)entries > (size_t)-1 - count * sizeof(*entries))
+		return -EINVAL;
+	if (!base || !capacity || capacity > 0xffffffffULL ||
+	    base > ~0ULL - capacity)
+		return -ERANGE;
+	for (i = 0; i < count; i++) {
+		const struct tetris_modem_smem_entry *entry = &entries[i];
+
+		if (entry->id > 0x7fffffffU || (entry->flags & ~0x1ffU) ||
+		    (entry->flags & 4))
+			return -EINVAL;
+		if (entry->offset < cursor || entry->offset > capacity ||
+		    entry->size > capacity - entry->offset ||
+		    entry->offset > 0xffffffffU - md_offset ||
+		    entry->size > 0xffffffffU - md_offset - entry->offset)
+			return -ERANGE;
+		for (j = 0; j < i; j++)
+			if (entries[j].id == entry->id)
+				return -EEXIST;
+		if (entry->offset > cursor)
+			rows++;
+		cursor = entry->offset + entry->size;
+	}
+	if (rows * 40 > size)
+		return -ENOSPC;
+	if (buffer_overlap(buffer, rows * 40, entries, count * sizeof(*entries)))
+		return -EINVAL;
+	cursor = 0;
+	for (i = 0; i < count; i++) {
+		const struct tetris_modem_smem_entry *entry = &entries[i];
+
+		if (entry->offset > cursor) {
+			put_smem(out, base, entry->id, cursor, entry->offset - cursor,
+				 4, md_offset);
+			out += 40;
+		}
+		put_smem(out, base, entry->id, entry->offset, entry->size,
+			 entry->flags, md_offset);
+		out += 40;
+		cursor = entry->offset + entry->size;
+	}
+	return rows * 40;
+}
+
 int tetris_modem_encode_tags(const struct tetris_modem_tag *tags, size_t count,
 			     void *buffer, size_t size)
 {

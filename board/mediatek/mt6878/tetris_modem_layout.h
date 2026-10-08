@@ -65,6 +65,27 @@ struct tetris_modem_tag {
 int tetris_modem_encode_tags(const struct tetris_modem_tag *tags, size_t count,
 			     void *buffer, size_t size);
 
+struct tetris_modem_smem_entry {
+	unsigned int id;
+	unsigned int offset;
+	unsigned int size;
+	unsigned int flags;
+};
+
+/*
+ * Encode already resolved, ordered shared-memory placements as LK's 40-byte
+ * runtime rows, inserting explicit padding for gaps. Returns byte count.
+ * Caller supplies owned AP reservation and independently established MD view;
+ * no allocation, mapping, clearing of shared RAM or protection is performed.
+ * Does not choose region sizes/IDs or assert that this is a complete table.
+ * Zero-size entries are preserved; unused reservation tail is not a row.
+ * Reject duplicate IDs, caller padding flags and unknown flags. Errors leave
+ * output unchanged; immutable input and output must not overlap.
+ */
+int tetris_modem_encode_smem(const struct tetris_modem_smem_entry *entries,
+			    size_t count, unsigned long long base, size_t capacity,
+			    unsigned int md_offset, void *buffer, size_t size);
+
 /*
  * Relative load plan only: caller must authenticate both immutable images,
  * establish device/rollback policy and exclusively reserve the supplied

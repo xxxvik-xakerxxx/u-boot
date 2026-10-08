@@ -376,13 +376,43 @@ Native CI tests cover byte layout, unaligned destination and guards, name/count/
 size boundaries, duplicate tags, metadata/payload aliasing and pointer wrap.
 The C handoff test passes a generated full fixture through the existing
 structure and payload validator rather than a second test-only parser.
-These new native tests are pending CI; no local C build was performed.
+These native tests, the C validator roundtrip and full ARM64 build passed
+CI 37773917358 for ``36ee5fcae5``; no local C build was performed.
 
 This is framing, not a modem-ready handoff: no DT descriptor is published,
 no physical RAM is reserved or freed, and no protection/reset operation runs.
 Complete validated shared-memory contents and secure handoff are still required.
 In particular, the existing ``no-fdt`` observation cannot be fixed merely by
 advertising this buffer as firmware-ready.
+
+Shared-memory runtime rows
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_encode_smem()`` encodes caller-resolved ID/offset/size/flags
+placements into the 40-byte B4.1 runtime row ABI. It inserts a padding row
+for each gap, with the following region's ID and flag bit 2. AP physical
+address is reservation base plus offset; MD offset is supplied independently.
+AP virtual address and alignment fields are zero, matching LK's builder.
+Zero-size entries remain present; unused allocation tail is not emitted.
+
+Evidence is the pinned LK payload helper ``0x235c4..0x237f4``. The pmOS
+``patches/modem/test-lk-smem-builder.py`` executes it on 16 synthetic scenarios,
+intercepting calloc, physical reservation and logging. Complete output bytes
+match across gap/no-gap/zero-size cases, AP bases below/above 4 GiB and MD
+offset bases 0/0x08000000. Inputs are synthetic; no stock RAM or MMIO is touched.
+
+The new C implementation additionally rejects overlaps/reordering, duplicate
+input IDs, unknown flags, explicit input padding, insufficient capacity,
+physical/MD address wrap and source/output aliasing before any output write.
+Its native CI tests are pending. Limits are 128 input regions and 256 output
+rows. These are producer limits, not a hardware inventory claim.
+
+This does not select real service-region sizes, compute their upstream
+alignment policy, reserve RAM, initialize shared contents, program protection
+or publish a ready handoff. Those remain integration gates. In particular,
+padding rows can repeat the next ID and zero-size rows are valid builder
+output; the earlier strict CCCI validator still rejects these forms and must
+be reconciled with the complete consumer mapping rules before publication.
 
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~

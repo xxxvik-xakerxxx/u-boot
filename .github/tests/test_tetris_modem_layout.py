@@ -110,6 +110,74 @@ class TagEncodingTest(unittest.TestCase):
         self.assertEqual(struct.unpack_from("<I", output.raw, 127 * 76 + 72)[0], 0)
 
 
+class SmemEntry(c.Structure):
+    _fields_ = [(name, c.c_uint) for name in ("id", "offset", "size", "flags")]
+
+
+encode_smem = library.tetris_modem_encode_smem
+encode_smem.argtypes = [c.POINTER(SmemEntry), c.c_size_t, c.c_ulonglong,
+                       c.c_size_t, c.c_uint, c.c_void_p, c.c_size_t]
+encode_smem.restype = c.c_int
+
+
+class SmemEncodingTest(unittest.TestCase):
+    def test_lk_equivalent_rows(self):
+        cases = [[(1, 0, 0x1000, 0)],
+                 [(1, 0, 0x1000, 0), (2, 0x1000, 0x2000, 0x100)],
+                 [(1, 0x1000, 0x1000, 0), (2, 0x4000, 0x2000, 8)],
+                 [(1, 0, 0, 0), (2, 0x1000, 0x1000, 0)]]
+        for entries in cases:
+            for base in (0x88000000, 0x128000000):
+                for bank in (0, 0x8000000):
+                    expected, cursor = bytearray(), 0
+                    for ident, offset, size, flags in entries:
+                        if offset > cursor:
+                            expected += struct.pack("<QQIIIIII", base + cursor, 0,
+                                                    ident, cursor, offset - cursor,
+                                                    0, 4, bank + cursor)
+                        expected += struct.pack("<QQIIIIII", base + offset, 0, ident,
+                                                offset, size, 0, flags, bank + offset)
+                        cursor = offset + size
+                    source = (SmemEntry * len(entries))(*[SmemEntry(*row) for row in entries])
+                    output = c.create_string_buffer(b"\xa5" * 1024, 1024)
+                    ret = encode_smem(source, len(entries), base, 0x10000,
+                                      bank, c.byref(output, 1), 1022)
+                    self.assertEqual(ret, len(expected))
+                    self.assertEqual(output.raw, b"\xa5" + expected +
+                                     b"\xa5" * (1023 - len(expected)))
+
+    def test_reject_without_output_changes(self):
+        cases = [([(1, 0, 8, 0), (2, 4, 8, 0)], 0x1000, 0, 0x88000000),
+                 ([(1, 0, 8, 0), (1, 8, 8, 0)], 0x1000, 0, 0x88000000),
+                 ([(1, 0, 8, 4)], 0x1000, 0, 0x88000000),
+                 ([(1, 0, 8, 0x200)], 0x1000, 0, 0x88000000),
+                 ([(0xFFFFFFFF, 0, 8, 0)], 0x1000, 0, 0x88000000),
+                 ([(1, 0x1000, 1, 0)], 0x1000, 0, 0x88000000),
+                 ([(1, 4, 8, 0)], 0x1000, 0xFFFFFFF8, 0x88000000),
+                 ([(1, 0, 8, 0)], 0x1000, 0, 2**64 - 0x800),
+                 ([(1, 0, 8, 0)], 0, 0, 0x88000000),
+                 ([(1, 0, 8, 0)], 2**32, 0, 0x88000000)]
+        for entries, capacity, bank, base in cases:
+            source = (SmemEntry * len(entries))(*[SmemEntry(*row) for row in entries])
+            output = c.create_string_buffer(b"\xa5" * 1024, 1024)
+            self.assertLess(encode_smem(source, len(entries), base, capacity,
+                                       bank, output, 1024), 0)
+            self.assertEqual(output.raw, b"\xa5" * 1024)
+
+    def test_count_capacity_and_alias(self):
+        source = (SmemEntry * 128)(*[SmemEntry(i, i, 1, 0) for i in range(128)])
+        output = c.create_string_buffer(5120)
+        self.assertEqual(encode_smem(source, 128, 0x88000000, 128, 0, output, 5120), 5120)
+        for count, size in ((0, 5120), (129, 5120), (128, 5119)):
+            before = output.raw
+            self.assertLess(encode_smem(source, count, 0x88000000, 128, 0, output, size), 0)
+            self.assertEqual(output.raw, before)
+        before = bytes(source)
+        self.assertEqual(encode_smem(source, 1, 0x88000000, 128, 0, source, 40), -errno.EINVAL)
+        self.assertEqual(bytes(source), before)
+        self.assertEqual(encode_smem(None, 1, 0x88000000, 128, 0, output, 5120), -errno.EINVAL)
+
+
 class Remap(c.Structure):
     _fields_ = [("value", c.c_uint * 6), ("mask", c.c_uint * 6)]
 
