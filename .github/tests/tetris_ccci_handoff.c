@@ -766,6 +766,95 @@ static void test_payload_failures(void)
 		"payload failure omits payload marker");
 }
 
+static void test_smem_mapping(void)
+{
+	struct fixture fixture;
+	struct tetris_ccci_access access = {
+		.range_allowed = fixture_range_allowed,
+		.context = &fixture,
+	};
+	struct tetris_ccci_result result;
+	struct tetris_modem_smem_entry entries[] = {
+		{ .id = 1, .offset = 0, .size = 0x1000 },
+		{ .id = 2, .offset = 0x1000, .size = 0 },
+		{ .id = 3, .offset = 0x1000, .size = 0x1000 },
+	};
+	u8 rows[160], count[4];
+	struct tetris_ccci_tag_data count_tag = { count, sizeof(count) };
+	struct tetris_ccci_tag_data layout = { rows, 0 };
+	unsigned int scenario;
+	int bytes, ret;
+
+	for (scenario = 0; scenario < 12; scenario++) {
+		fixture_init(&fixture, true, false);
+		memset(&result, 0, sizeof(result));
+		entries[0].offset = 0;
+		entries[0].size = 0x1000;
+		entries[0].flags = 0;
+		entries[1].offset = 0x1000;
+		entries[2].offset = 0x1000;
+		entries[2].size = 0x1000;
+		if (scenario == 1) {
+			entries[0].offset = 0x1000;
+			entries[1].offset = 0x2000;
+			entries[2].offset = 0x2000;
+		} else if (scenario == 2 || scenario == 3) {
+			entries[0].flags = scenario == 2 ? BIT(3) : 0;
+			entries[1].offset = 0x2000;
+			entries[2].offset = 0x2000;
+		} else if (scenario == 4) {
+			entries[0].size = 0;
+			entries[1].offset = 0;
+			entries[2].offset = 0;
+			entries[2].size = 0;
+		}
+		bytes = tetris_modem_encode_smem(entries, ARRAY_SIZE(entries),
+						 TEST_SMEM_BASE, TEST_SMEM_SIZE, 0,
+						 rows, sizeof(rows));
+		require(bytes > 0, "encode shared-memory mapping fixture");
+		layout.size = bytes;
+		put_le32(count, bytes / TETRIS_CCCI_SMEM_REGION_SIZE);
+		switch (scenario) {
+		case 5:
+			put_le32(rows + 16, 0xffffffff);
+			break;
+		case 6:
+			put_le32(rows + 32, BIT(9));
+			break;
+		case 7:
+			put_le32(rows + 40 + 32, BIT(2));
+			break;
+		case 8:
+			put_le32(rows + 32, BIT(2) | BIT(3));
+			break;
+		case 9:
+			put_le32(rows + 40 + 16, 1);
+			break;
+		case 10:
+			put_le64(rows + 40, TEST_MEMORY_BASE + TEST_MEMORY_SIZE);
+			break;
+		case 11:
+			put_le32(rows + 24, 0);
+			put_le64(rows + 40, TEST_SMEM_BASE);
+			put_le32(rows + 40 + 20, 0);
+			put_le32(rows + 40 + 32, BIT(3));
+			break;
+		}
+		ret = tetris_ccci_validate_smem_table(fixture.fdt, &access,
+						      &count_tag, &layout, &result);
+		if (scenario < 3)
+			require(!ret, "producer rows satisfy consumer mapping contract");
+		else
+			require(ret < 0 && result.failure == TETRIS_CCCI_BAD_SMEM_TABLE,
+				"unsafe shared-memory mapping rejected");
+	}
+
+	fixture_init(&fixture, true, false);
+	put_le32(fixture_tag_data(&fixture, "c_smem_layout", NULL) + 16, 1);
+	expect_failure(&fixture, TETRIS_CCCI_BAD_SMEM_TABLE, true,
+		       "NC and cache regions cannot share a real ID");
+}
+
 static void test_encoded_tags(void)
 {
 	struct fixture fixture;
@@ -986,6 +1075,7 @@ int main(void)
 	test_invalid_status();
 	test_payload_failures();
 	test_encoded_tags();
+	test_smem_mapping();
 	test_publish_no_space();
 	test_tag_failures();
 	test_gnss_emi_handoff();

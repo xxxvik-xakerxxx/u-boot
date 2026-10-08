@@ -806,6 +806,9 @@ static int tetris_ccci_validate_smem_table(const void *fdt,
 					   struct tetris_ccci_result *result)
 {
 	u32 count = get_unaligned_le32(count_tag->data);
+	u64 origin = 0, first_base = 0;
+	u32 first_offset = 0, cursor = 0, mapped_offset = 0, mapped_size = 0;
+	bool mapping = false, populated = false;
 	unsigned int i, j;
 
 	if (!count || count > UINT32_MAX / TETRIS_CCCI_SMEM_REGION_SIZE ||
@@ -819,14 +822,47 @@ static int tetris_ccci_validate_smem_table(const void *fdt,
 			i * TETRIS_CCCI_SMEM_REGION_SIZE;
 		u64 base = get_unaligned_le64(entry);
 		u32 id = get_unaligned_le32(entry + 16);
+		u32 offset = get_unaligned_le32(entry + 20);
 		u32 size = get_unaligned_le32(entry + 24);
 		u32 align = get_unaligned_le32(entry + 28);
+		u32 flags = get_unaligned_le32(entry + 32);
+		bool padding = flags & BIT(2);
 
-		if (!base || !size ||
+		if (!i) {
+			if (base < offset)
+				goto bad_range;
+			origin = base - offset;
+			first_base = base;
+			first_offset = offset;
+			cursor = offset;
+		}
+		if (!base || offset != cursor || origin > ~0ULL - offset ||
+		    base != origin + offset || size > UINT32_MAX - offset ||
+		    id > 0x7fffffffU || (flags & ~0x1ffU) ||
+		    (padding && (flags != BIT(2) || !size)) ||
 		    (align && ((align & (align - 1)) || (base & (align - 1)))) ||
-		    !tetris_ccci_payload_range_allowed(fdt, access, base, size)) {
-			result->failure = TETRIS_CCCI_BAD_SMEM_TABLE;
-			return -ERANGE;
+		    (size && !tetris_ccci_payload_range_allowed(fdt, access, base, size)))
+			goto bad_range;
+		cursor = offset + size;
+		if (!padding && size)
+			populated = true;
+
+		/* B4.1 skips padding, then maps the sum of each ordinary run. */
+		if (!padding) {
+			if (flags & BIT(3)) {
+				if (mapping && !mapped_size)
+					goto bad_range;
+				mapping = false;
+			} else {
+				if (!mapping) {
+					mapped_offset = offset;
+					mapped_size = 0;
+					mapping = true;
+				}
+				if (offset - mapped_offset != mapped_size)
+					goto bad_range;
+				mapped_size += size;
+			}
 		}
 
 		for (j = 0; j < i; j++) {
@@ -835,17 +871,28 @@ static int tetris_ccci_validate_smem_table(const void *fdt,
 			u64 previous_base = get_unaligned_le64(previous);
 			u32 previous_id = get_unaligned_le32(previous + 16);
 			u32 previous_size = get_unaligned_le32(previous + 24);
+			u32 previous_flags = get_unaligned_le32(previous + 32);
 
-			if (id == previous_id ||
-			    tetris_ccci_ranges_overlap(base, size, previous_base,
-						       previous_size)) {
+			if ((!padding && !(previous_flags & BIT(2)) && id == previous_id) ||
+			    (size && previous_size &&
+			     tetris_ccci_ranges_overlap(base, size, previous_base,
+							previous_size))) {
 				result->failure = TETRIS_CCCI_BAD_SMEM_TABLE;
 				return -EINVAL;
 			}
 		}
 	}
+	/* Also bounds zero-size rows, including a one-past-end final entry. */
+	if (!populated || (mapping && !mapped_size) ||
+	    !tetris_ccci_payload_range_allowed(fdt, access, first_base,
+					      cursor - first_offset))
+		goto bad_range;
 
 	return 0;
+
+bad_range:
+	result->failure = TETRIS_CCCI_BAD_SMEM_TABLE;
+	return -ERANGE;
 }
 
 static bool tetris_ccci_smem_tables_overlap(const struct tetris_ccci_tag_data *first,
@@ -860,15 +907,22 @@ static bool tetris_ccci_smem_tables_overlap(const struct tetris_ccci_tag_data *f
 			i * TETRIS_CCCI_SMEM_REGION_SIZE;
 		u64 first_base = get_unaligned_le64(first_entry);
 		u32 first_size = get_unaligned_le32(first_entry + 24);
+		u32 first_id = get_unaligned_le32(first_entry + 16);
+		u32 first_flags = get_unaligned_le32(first_entry + 32);
 
 		for (j = 0; j < second_count; j++) {
 			const u8 *second_entry = second->data +
 				j * TETRIS_CCCI_SMEM_REGION_SIZE;
 			u64 second_base = get_unaligned_le64(second_entry);
 			u32 second_size = get_unaligned_le32(second_entry + 24);
+			u32 second_id = get_unaligned_le32(second_entry + 16);
+			u32 second_flags = get_unaligned_le32(second_entry + 32);
 
-			if (tetris_ccci_ranges_overlap(first_base, first_size,
-						       second_base, second_size))
+			if ((!(first_flags & BIT(2)) && !(second_flags & BIT(2)) &&
+			     first_id == second_id) ||
+			    (first_size && second_size &&
+			     tetris_ccci_ranges_overlap(first_base, first_size,
+							second_base, second_size)))
 				return true;
 		}
 	}

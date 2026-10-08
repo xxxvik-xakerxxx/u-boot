@@ -404,15 +404,22 @@ offset bases 0/0x08000000. Inputs are synthetic; no stock RAM or MMIO is touched
 The new C implementation additionally rejects overlaps/reordering, duplicate
 input IDs, unknown flags, explicit input padding, insufficient capacity,
 physical/MD address wrap and source/output aliasing before any output write.
-Its native CI tests are pending. Limits are 128 input regions and 256 output
+Its native tests and ARM64 build passed CI ``37779916561``. Limits are 128 input regions and 256 output
 rows. These are producer limits, not a hardware inventory claim.
 
 This does not select real service-region sizes, compute their upstream
 alignment policy, reserve RAM, initialize shared contents, program protection
-or publish a ready handoff. Those remain integration gates. In particular,
-padding rows can repeat the next ID and zero-size rows are valid builder
-output; the earlier strict CCCI validator still rejects these forms and must
-be reconciled with the complete consumer mapping rules before publication.
+or publish a ready handoff. Those remain integration gates.
+
+The validator now accepts repeated padding IDs and zero-size ordinary rows
+within a nonempty mapping run. It requires a contiguous physical/offset span
+inside reserved DRAM, unique non-padding IDs across NC/cache tables and known
+flags. It rejects empty mapping runs and padding gaps inside an ordinary run:
+the B4.1 consumer skips padding when summing mapping size, but uses offsets
+for virtual addresses. Leading padding and NO_MAP-separated gaps are supported.
+These are conservative producer-profile restrictions, not a claim to accept
+every stock table. New producer-to-validator regression tests run in CI;
+no ready handoff or hardware support is enabled by these checks.
 
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~
