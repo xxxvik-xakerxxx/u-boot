@@ -512,8 +512,8 @@ are payload-relative, not phone-write instructions. No state is changed on
 hardware. This verifies conditional routing, not the actual boot-stage state
 on the phone or the complete modem protection policy.
 
-Pinned core policy candidate
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Pinned normal-path policy candidate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``tetris_modem_plan_emi_policy()`` accepts the verified declared-image SHA256
 ``5d2bedd00049fced983d3ae53989616c5c9f46c4eddd32a01a1ad46ff8d2c50f``
@@ -529,7 +529,22 @@ checked transaction. This is a strict acceptance policy: preloader uses OR
 updates, so the table alone does not prove reset defaults. The live readbacks
 must match; never relax them to accept unexplained additional access.
 
-Unknown hashes, shared-memory slots 39/41..43 and dynamic padding slot 40
+Shared-memory slots now use the first table's RW grants: 41 permits AIDs
+(35,37,47,241), 42 permits (35,38,39,42,43,44,45,47,241), and 43 permits
+(35,40,47,241). All other fields must remain denied, including AID 240.
+Native CI tests check all 256 fields and reject an unexpected AEE grant
+before the range write. Shared-peer ownership is still a caller prerequisite.
+
+The pmOS offline audit now executes the real caller at ``0x0207d594``, AEE
+predicate, configuration comparisons and walkers in 180 synthetic scenarios.
+Configuration ``aee_enable=no`` selects the first table. Otherwise a nonzero
+seven-bit exception field or watchdog status other than 0, 2 or 0x800 selects
+the second table. This is not a cold/warm selector. Diagnostic magic changes
+logging, not table selection. Hardware helpers are intercepted; these tests
+do not prove reset policy or the handset's actual boot-mode inputs. The AEE
+second list must never be merged into the normal-path planner output.
+
+Unknown hashes, auxiliary slot 39 and dynamic padding slot 40
 are rejected with unchanged output. Selecting the actually booted preloader,
 its matching ATF and the remaining policy/ownership chain is still mandatory.
 No boot caller is added. The pmOS repository records the complete sparse table

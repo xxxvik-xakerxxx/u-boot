@@ -27,10 +27,15 @@ struct tetris_modem_emi_ops {
 };
 
 /*
- * Candidate cold-state policy for core slots 32..38 only, from preloader
+ * Candidate normal-path policy for core slots 32..38 and shared slots 41..43,
+ * from preloader
  * image SHA256 5d2bedd0...8d2c50f (GFH header plus declared image).
  * Caller supplies a verified image digest, not an assumed firmware version.
- * Unknown images, shared-memory slots and dynamic padding fail closed.
+ * Unknown images, auxiliary slot 39 and dynamic padding slot 40 fail closed.
+ * The normal/AEE branch was traced through the pinned preloader predicate;
+ * this is NOT a cold/warm distinction. The AEE second list is not combined
+ * with the first. Caller must independently establish normal-path state and
+ * exclusive ownership of each supplied range, including shared-memory peers.
  * Unlisted AIDs are expected denied: this is an acceptance condition, NOT
  * evidence of reset defaults. The transaction must verify every field.
  * No hardware writes; output remains unchanged on failure.

@@ -22,16 +22,33 @@ int tetris_modem_plan_emi_policy(const unsigned char preloader_sha256[32],
 		{ 3, 3, 3 }, { 3, 2, 2 }, { 2, 3, 3 },
 	};
 	static const unsigned char aids[3] = { 35, 47, 93 };
+	/* First-list shared-memory policy; never OR in the AEE second list. */
+	static const unsigned char shared_aids[3][9] = {
+		{ 35, 37, 47, 241 },
+		{ 35, 38, 39, 42, 43, 44, 45, 47, 241 },
+		{ 35, 40, 47, 241 },
+	};
 	unsigned long long out[TETRIS_MODEM_EMI_POLICY_WORDS] = { 0 };
 	unsigned int i;
 
 	if (!preloader_sha256 || !policy)
 		return -EINVAL;
-	if (memcmp(preloader_sha256, digest, sizeof(digest)) || slot < 32 || slot > 38)
+	if (memcmp(preloader_sha256, digest, sizeof(digest)) ||
+	    !((slot >= 32 && slot <= 38) || (slot >= 41 && slot <= 43)))
 		return -EOPNOTSUPP;
-	for (i = 0; i < 3; i++)
-		out[aids[i] / 32] |= (unsigned long long)permissions[slot - 32][i]
-				    << (2 * (aids[i] % 32));
+	if (slot <= 38) {
+		for (i = 0; i < 3; i++)
+			out[aids[i] / 32] |= (unsigned long long)permissions[slot - 32][i]
+					    << (2 * (aids[i] % 32));
+	} else {
+		for (i = 0; i < sizeof(shared_aids[0]); i++) {
+			unsigned int aid = shared_aids[slot - 41][i];
+
+			if (!aid)
+				break;
+			out[aid / 32] |= 3ULL << (2 * (aid % 32));
+		}
+	}
 	memcpy(policy, out, sizeof(out));
 	return 0;
 }

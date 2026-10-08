@@ -47,19 +47,39 @@ class EmiTransactionTest(unittest.TestCase):
                                  expected.get(aid, 0))
             self.assertEqual(self.run_case(slot=slot, policy=policy)[0], 0)
 
+    def test_shared_policy_excludes_aee_rights(self):
+        digest = (c.c_ubyte * 32).from_buffer_copy(PRELOADER_SHA)
+        expected = {41: (35, 37, 47, 241),
+                    42: (35, 38, 39, 42, 43, 44, 45, 47, 241),
+                    43: (35, 40, 47, 241)}
+        for slot, allowed in expected.items():
+            policy = (c.c_ulonglong * 8)(*([2**64 - 1] * 8))
+            self.assertEqual(plan_policy(digest, slot, policy), 0)
+            for aid in range(256):
+                self.assertEqual((policy[aid // 32] >> (2 * (aid % 32))) & 3,
+                                 3 if aid in allowed else 0)
+            self.assertEqual(self.run_case(slot=slot, policy=policy)[0], 0)
+            # AEE grants to AID 240 must reject before the one-shot range write.
+            wrong = policy[7] | (2 << (2 * (240 % 32)))
+            ret, tx, calls = self.run_case(slot=slot, policy=policy, corrupt=(8, wrong))
+            self.assertEqual(ret, -errno.EIO)
+            self.assertEqual(len(calls), 9)
+            self.assertTrue(all(call[2] == 2 for call in calls))
+
     def test_unknown_profiles_slots_and_null_policy(self):
         digest = (c.c_ubyte * 32).from_buffer_copy(PRELOADER_SHA)
         policy = (c.c_ulonglong * 8)(*([0x55] * 8))
         before = bytes(policy)
-        for slot in (0, 31, 39, 40, 41, 42, 43, 64, 2**32 - 1):
+        for slot in (0, 31, 39, 40, 44, 64, 2**32 - 1):
             self.assertEqual(plan_policy(digest, slot, policy), -errno.EOPNOTSUPP)
             self.assertEqual(bytes(policy), before)
         for bit in range(256):
             wrong = bytearray(PRELOADER_SHA)
             wrong[bit // 8] ^= 1 << (bit % 8)
             mutated = (c.c_ubyte * 32).from_buffer_copy(wrong)
-            self.assertEqual(plan_policy(mutated, 32, policy), -errno.EOPNOTSUPP)
-            self.assertEqual(bytes(policy), before)
+            for slot in (32, 41, 42, 43):
+                self.assertEqual(plan_policy(mutated, slot, policy), -errno.EOPNOTSUPP)
+                self.assertEqual(bytes(policy), before)
         self.assertEqual(plan_policy(None, 32, policy), -errno.EINVAL)
         self.assertEqual(plan_policy(digest, 32, None), -errno.EINVAL)
 
