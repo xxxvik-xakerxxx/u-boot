@@ -221,8 +221,8 @@ static void put_smem(unsigned char *out, unsigned long long base,
 }
 
 int tetris_modem_encode_smem(const struct tetris_modem_smem_entry *entries,
-			    size_t count, unsigned long long base, size_t capacity,
-			    unsigned int md_offset, void *buffer, size_t size)
+			     size_t count, unsigned long long base, size_t capacity,
+			     unsigned int md_offset, void *buffer, size_t size)
 {
 	unsigned char *out = buffer;
 	size_t i, j, rows = count;

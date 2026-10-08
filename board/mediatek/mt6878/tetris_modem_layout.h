@@ -83,8 +83,8 @@ struct tetris_modem_smem_entry {
  * output unchanged; immutable input and output must not overlap.
  */
 int tetris_modem_encode_smem(const struct tetris_modem_smem_entry *entries,
-			    size_t count, unsigned long long base, size_t capacity,
-			    unsigned int md_offset, void *buffer, size_t size);
+			     size_t count, unsigned long long base, size_t capacity,
+			     unsigned int md_offset, void *buffer, size_t size);
 
 /*
  * Relative load plan only: caller must authenticate both immutable images,
