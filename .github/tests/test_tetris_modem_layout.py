@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0+
 """CI-only execution of the native relative modem layout planner."""
 import ctypes as c
+import errno
 import os
 from pathlib import Path
 import struct
@@ -39,6 +40,74 @@ encode_memory = library.tetris_modem_encode_memory
 encode_memory.argtypes = [c.POINTER(MemoryMap), c.c_ulonglong, c.c_size_t,
                           c.c_void_p, c.c_size_t]
 encode_memory.restype = c.c_int
+
+
+class Tag(c.Structure):
+    _fields_ = [("name", c.c_char * 64), ("data", c.c_void_p), ("size", c.c_size_t)]
+
+
+encode_tags = library.tetris_modem_encode_tags
+encode_tags.argtypes = [c.POINTER(Tag), c.c_size_t, c.c_void_p, c.c_size_t]
+encode_tags.restype = c.c_int
+
+
+class TagEncodingTest(unittest.TestCase):
+    def test_exact_wire_and_guards(self):
+        first, second = c.create_string_buffer(b"abc"), c.create_string_buffer(b"12345")
+        tags = (Tag * 2)(Tag(b"one", c.addressof(first), 3),
+                         Tag(b"two", c.addressof(second), 5))
+        output = c.create_string_buffer(b"\xa5" * 200, 200)
+        self.assertEqual(encode_tags(tags, 2, c.byref(output, 1), 198), 160)
+        expected = (struct.pack("<64sIII", b"one", 152, 3, 76) +
+                    struct.pack("<64sIII", b"two", 155, 5, 0) + b"abc12345")
+        self.assertEqual(output.raw, b"\xa5" + expected + b"\xa5" * 39)
+
+    def test_atomic_rejections(self):
+        data = c.create_string_buffer(b"abc")
+        for name, pointer, length, count, capacity, error in (
+                (b"", c.addressof(data), 3, 1, 128, errno.EINVAL),
+                (b"x" * 64, c.addressof(data), 3, 1, 128, errno.EINVAL),
+                (b"x", None, 3, 1, 128, errno.EINVAL),
+                (b"x", c.addressof(data), 0, 1, 128, errno.EINVAL),
+                (b"x", c.addressof(data), 3, 0, 128, errno.EINVAL),
+                (b"x", c.addressof(data), 3, 129, 128, errno.EINVAL),
+                (b"x", c.addressof(data), 3, 1, 78, errno.ENOSPC),
+                (b"x", c.addressof(data), 65536, 1, 128, errno.E2BIG),
+                (b"x", c.addressof(data), c.c_size_t(-1).value, 1, 128, errno.E2BIG)):
+            output = c.create_string_buffer(b"\xa5" * 128, 128)
+            tag = Tag(name, pointer, length)
+            self.assertEqual(encode_tags(c.byref(tag), count, output, capacity), -error)
+            self.assertEqual(output.raw, b"\xa5" * 128)
+
+    def test_duplicates_and_aliases(self):
+        data = c.create_string_buffer(b"abc")
+        tags = (Tag * 2)(*[Tag(b"same", c.addressof(data), 3)] * 2)
+        output = c.create_string_buffer(b"\xa5" * 256, 256)
+        self.assertEqual(encode_tags(tags, 2, output, 256), -errno.EEXIST)
+        tags[1].name = b"other"
+        tags[1].data = c.addressof(output) + 155
+        self.assertEqual(encode_tags(tags, 2, output, 256), -errno.EINVAL)
+        self.assertEqual(output.raw, b"\xa5" * 256)
+        before = bytes(tags)
+        self.assertEqual(encode_tags(tags, 1, tags, 256), -errno.EINVAL)
+        self.assertEqual(bytes(tags), before)
+        tag = Tag(b"wrap", c.c_size_t(-2).value, 3)
+        self.assertEqual(encode_tags(c.byref(tag), 1, output, 256), -errno.EINVAL)
+        tag.data = c.addressof(data)
+        self.assertEqual(encode_tags(c.byref(tag), 1, c.c_size_t(-2).value, 256),
+                         -errno.EINVAL)
+
+    def test_limits(self):
+        payload = c.create_string_buffer(b"z" * (65536 - 76))
+        tag = Tag(b"n" * 63, c.addressof(payload), 65536 - 76)
+        output = c.create_string_buffer(65536)
+        self.assertEqual(encode_tags(c.byref(tag), 1, output, 65536), 65536)
+        self.assertEqual(output.raw[63], 0)
+        self.assertEqual(output.raw[76:], payload.raw[:-1])
+        tags = (Tag * 128)(*[Tag(str(i).encode(), c.addressof(payload), 1)
+                             for i in range(128)])
+        self.assertEqual(encode_tags(tags, 128, output, 65536), 128 * 77)
+        self.assertEqual(struct.unpack_from("<I", output.raw, 127 * 76 + 72)[0], 0)
 
 
 class Remap(c.Structure):

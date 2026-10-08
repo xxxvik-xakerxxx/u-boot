@@ -766,6 +766,32 @@ static void test_payload_failures(void)
 		"payload failure omits payload marker");
 }
 
+static void test_encoded_tags(void)
+{
+	struct fixture fixture;
+	struct tetris_modem_tag tags[ARRAY_SIZE(v2_tags)] = { 0 };
+	u8 output[TEST_TAG_SIZE];
+	u32 size;
+	unsigned int i;
+	int bytes, ret;
+
+	fixture_init(&fixture, true, false);
+	for (i = 0; i < ARRAY_SIZE(v2_tags); i++) {
+		strcpy(tags[i].name, v2_tags[i].name);
+		tags[i].data = fixture_tag_data(&fixture, tags[i].name, &size);
+		tags[i].size = size;
+	}
+	bytes = tetris_modem_encode_tags(tags, ARRAY_SIZE(tags), output, sizeof(output));
+	require(bytes > 0, "encode v2 CCCI payload");
+	memcpy(fixture.tags, output, bytes);
+	fixture.descriptor_size = bytes;
+	fixture_set_descriptor(&fixture, true, fixture.base, bytes, ARRAY_SIZE(tags), 2);
+	require(observe(&fixture, &ret) == TETRIS_CCCI_OK && !ret,
+		"encoded CCCI tags pass real structure and payload validator");
+	require(fixture.map_calls == 1 && fixture.unmap_calls == 1,
+		"encoded table mapped and released once");
+}
+
 static void test_publish_no_space(void)
 {
 	struct fixture fixture;
@@ -959,6 +985,7 @@ int main(void)
 	test_descriptor_failures();
 	test_invalid_status();
 	test_payload_failures();
+	test_encoded_tags();
 	test_publish_no_space();
 	test_tag_failures();
 	test_gnss_emi_handoff();

@@ -195,6 +195,62 @@ static void put_word(unsigned char *p, unsigned int value)
 	p[3] = value >> 24;
 }
 
+static int buffer_overlap(const void *a, size_t a_size, const void *b, size_t b_size)
+{
+	size_t first = (size_t)a, second = (size_t)b;
+
+	if (first > (size_t)-1 - a_size || second > (size_t)-1 - b_size)
+		return 1;
+	return first < second + b_size && second < first + a_size;
+}
+
+int tetris_modem_encode_tags(const struct tetris_modem_tag *tags, size_t count,
+			     void *buffer, size_t size)
+{
+	unsigned char *out = buffer;
+	size_t i, j, total, offset;
+
+	if (!tags || !buffer || !count || count > TETRIS_MODEM_TAG_MAX_COUNT ||
+	    (size_t)tags > (size_t)-1 - count * sizeof(*tags))
+		return -EINVAL;
+	total = count * TETRIS_MODEM_TAG_HEADER_SIZE;
+	for (i = 0; i < count; i++) {
+		if (!tags[i].name[0] ||
+		    !memchr(tags[i].name, 0, TETRIS_MODEM_TAG_NAME_SIZE) ||
+		    !tags[i].data || !tags[i].size)
+			return -EINVAL;
+		for (j = 0; j < i; j++)
+			if (!strcmp(tags[i].name, tags[j].name))
+				return -EEXIST;
+		if (tags[i].size > TETRIS_MODEM_TAG_MAX_BYTES - total)
+			return -E2BIG;
+		total += tags[i].size;
+	}
+	if (total > size)
+		return -ENOSPC;
+	if (buffer_overlap(buffer, total, tags, count * sizeof(*tags)))
+		return -EINVAL;
+	for (i = 0; i < count; i++)
+		if (buffer_overlap(buffer, total, tags[i].data, tags[i].size))
+			return -EINVAL;
+
+	/* All checks precede the first write; no pointers/native padding on wire. */
+	memset(out, 0, total);
+	offset = count * TETRIS_MODEM_TAG_HEADER_SIZE;
+	for (i = 0; i < count; i++) {
+		unsigned char *header = out + i * TETRIS_MODEM_TAG_HEADER_SIZE;
+
+		memcpy(header, tags[i].name, strlen(tags[i].name));
+		put_word(header + 64, offset);
+		put_word(header + 68, tags[i].size);
+		put_word(header + 72, i + 1 < count ?
+			 (i + 1) * TETRIS_MODEM_TAG_HEADER_SIZE : 0);
+		memcpy(out + offset, tags[i].data, tags[i].size);
+		offset += tags[i].size;
+	}
+	return total;
+}
+
 int tetris_modem_encode_memory(const struct tetris_modem_memory_map *map,
 		unsigned long long base, size_t capacity, void *buffer, size_t size)
 {

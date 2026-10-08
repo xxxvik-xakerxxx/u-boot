@@ -357,6 +357,33 @@ No DT tag descriptor, readiness marker or
 modem consumer is enabled: the complete shared-memory layout and secure
 protection/reset handoff are still required before publication to Linux.
 
+CCCI v2 tag serialization
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_encode_tags()`` builds the byte-oriented v2 table consumed by
+the pinned B4.1 ``ccci_util_lib_fo.c``: 64-byte NUL-terminated names followed
+by little-endian data offset, data length and next-header offset. Headers are
+76 bytes, payloads follow all headers, and the last link is zero. No native
+pointer or structure padding is exposed. Payloads must already be encoded.
+
+The producer limits input to 128 nonempty, uniquely named tags and 64 KiB
+total. This count is a conservative producer limit, not a discovered firmware
+maximum. It rejects pointer/range overflow, undersized output and input/output
+overlap before writing any byte. Unused destination capacity is untouched.
+Inputs remain immutable through the copy. Errors preserve the destination.
+
+Native CI tests cover byte layout, unaligned destination and guards, name/count/
+size boundaries, duplicate tags, metadata/payload aliasing and pointer wrap.
+The C handoff test passes a generated full fixture through the existing
+structure and payload validator rather than a second test-only parser.
+These new native tests are pending CI; no local C build was performed.
+
+This is framing, not a modem-ready handoff: no DT descriptor is published,
+no physical RAM is reserved or freed, and no protection/reset operation runs.
+Complete validated shared-memory contents and secure handoff are still required.
+In particular, the existing ``no-fdt`` observation cannot be fixed merely by
+advertising this buffer as firmware-ready.
+
 Relative modem load layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

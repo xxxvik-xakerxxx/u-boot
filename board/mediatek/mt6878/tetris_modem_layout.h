@@ -43,6 +43,28 @@ struct tetris_modem_emi_range {
 	unsigned int slot;
 };
 
+#define TETRIS_MODEM_TAG_NAME_SIZE 64
+#define TETRIS_MODEM_TAG_HEADER_SIZE 76
+#define TETRIS_MODEM_TAG_MAX_COUNT 128
+#define TETRIS_MODEM_TAG_MAX_BYTES 65536
+
+struct tetris_modem_tag {
+	char name[TETRIS_MODEM_TAG_NAME_SIZE];
+	const void *data;
+	size_t size;
+};
+
+/*
+ * Encode v2 CCCI tag headers and opaque, already encoded payloads. Returns
+ * bytes used or negative errno; errors leave the destination untouched.
+ * Inputs must remain immutable and cannot overlap the used destination.
+ * This validates framing only, NOT payload semantics, firmware authenticity,
+ * reservation/protection/reset state or readiness. Does not publish a DT
+ * descriptor. Caller must complete those gates before exposing tags to Linux.
+ */
+int tetris_modem_encode_tags(const struct tetris_modem_tag *tags, size_t count,
+			     void *buffer, size_t size);
+
 /*
  * Relative load plan only: caller must authenticate both immutable images,
  * establish device/rollback policy and exclusively reserve the supplied
