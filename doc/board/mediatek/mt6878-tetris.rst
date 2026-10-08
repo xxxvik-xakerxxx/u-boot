@@ -438,7 +438,9 @@ using actual callbacks and placement instructions with synthetic tag/env
 responses. The generated 28-case oracle in ``.github/tests/tetris_smem_b41.json``
 contains only synthetic inputs/outputs, not firmware. CI compares every row,
 capacity and count against the C planner, and tests planner-to-encoder-to-CCCI
-validation including the real NC padding gap. New CI result is pending.
+validation including the real NC padding gap. CI ``37794393803`` passed all
+native and handoff tests, the ARM64 build and image packaging for
+``b55c53989fba751b122122948f06736c5b26ebd9``.
 
 The caller must still establish the exact firmware/profile, obtain metadata,
 reserve and initialize RAM, apply/read back protection and remapping, and own
