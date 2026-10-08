@@ -512,6 +512,28 @@ are payload-relative, not phone-write instructions. No state is changed on
 hardware. This verifies conditional routing, not the actual boot-stage state
 on the phone or the complete modem protection policy.
 
+Checked range transaction
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_program_emi_range()`` provides the range-only BL_EMIMPU
+transaction with an injected transport, not a production SMC adapter or boot
+caller. It validates alignment, representability and containment in a
+caller-owned reservation before any callback. The sequence is disabled-state
+readback (operation 2/3), one range write (operation 0), then start, raw end
+and enabled-state readback (operation 2/0, 2/1, 2/3). Already enabled slots
+return ``-EBUSY`` without a write. Unexpected, missing or failed replies stop
+immediately; the first transport error is preserved. Any attempted callback
+consumes the transaction, including preflight reads. There is no disable,
+rollback or retry that could hide a partially configured one-shot slot.
+
+``RANGE_VERIFIED`` means exactly those readbacks matched, not that domain
+permissions are correct or the modem can boot. Independent reservation/slot
+ownership, boot-stage admission, complete permission policy and hardware end
+semantics remain mandatory before integration. The private-image emulator
+checks the same read/write sequence; native CI tests inject faults at every
+step and every result bit, cover all twelve slots and addresses above 4 GiB,
+and require invalid inputs to leave the transaction unchanged without calls.
+
 Range operation and recovery limits
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

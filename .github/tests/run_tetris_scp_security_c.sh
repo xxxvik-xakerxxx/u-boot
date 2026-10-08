@@ -21,8 +21,10 @@ cc=${HOSTCC:-cc}
     "$root/lib/asn1_decoder.c" "$work/tetris_scp_fields.asn1.c" \
     "$board/tetris_scp_security.c" "$board/tetris_scp_crypto.c" \
     "$board/tetris_modem_layout.c" "$board/tetris_modem_remap.c" \
+    "$board/tetris_modem_emi.c" \
     "$board/tetris_modem_bundle.c" "$board/tetris_modem_storage.c" -o "$work/security.so"
 "${PYTHON:-python3}" "$root/.github/tests/test_tetris_scp_security_c.py" "$work/security.so"
 "${PYTHON:-python3}" "$root/.github/tests/test_tetris_modem_security.py" "$work/security.so"
 "${PYTHON:-python3}" "$root/.github/tests/test_tetris_modem_layout.py" "$work/security.so"
 "${PYTHON:-python3}" "$root/.github/tests/test_tetris_modem_remap.py" "$work/security.so"
+"${PYTHON:-python3}" "$root/.github/tests/test_tetris_modem_emi.py" "$work/security.so"
