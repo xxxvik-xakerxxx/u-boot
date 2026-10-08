@@ -486,14 +486,44 @@ not evidence that operation 0 establishes the complete modem permissions.
 
 Reproduce with ``tools/tetris-modem-emi-contract.py --atf PATH --lk PATH``
 using Python with Capstone and Unicorn. It verifies both payload hashes and
-the LK instructions, then emulates only the bounded ATF dispatch. It stops
-before either helper or hardware access. Operations 0 through 15 and the
-all-ones input passed the offline check; no device SMC was issued. The tool
-requires the local stock binaries, which are not redistributed in CI.
+the LK instructions. The dispatch check stops before either helper; a separate
+range-handler check executes against synthetic zeroed BSS, stack and MMIO.
+Operations 0 through 15 and the all-ones dispatch input passed; no device SMC
+was issued. The tool requires local stock binaries, not redistributed in CI.
 
 Do not add an operation-6 success requirement or suppress its error as if
 permissions were installed. The next prerequisite is tracing operation 0's
 slot-specific policy and readback, not guessing missing permission masks.
+
+Range operation and recovery limits
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The extended offline check executes operation 0 at ``0x2f618`` through its
+real helpers. It normalizes page addresses in ``0x10300``, validates slots
+1..63 in ``0x10370`` and consumes a per-slot byte in ``0x10380``. Only slots
+8, 10, 11 and 19 bypass that one-shot check. None is a modem slot.
+
+With synthetic clear initial state, slots 32..43 each write exactly three
+MMIO words through ``0x2d61c``: start at ``0x10351000 + 8*(slot-1)``, end
+with bit 31 set at the next word, and the slot enable bit in the appropriate
+word starting at ``0x103512a4``. The handler does not write domain permission
+tables. Each repeated modem-slot call returns -4 without MMIO writes.
+Invalid slot or reversed/out-of-range normalized boundaries return -3.
+
+The same check confirms that high input page bits are silently truncated to
+24 bits. The existing loader planner must reject those inputs before a call;
+firmware acceptance is not evidence that the requested address was programmed.
+This is tested emulation, not measured register state on the handset.
+
+Operation 1 at ``0x2ed24`` is a restricted disable operation, NOT a getter.
+It returns -1 without MMIO writes for every modem slot 32..43. Do not use it
+for readback or rollback. All 12 first/repeated/disable scenarios and invalid
+input checks passed offline on 2026-10-08. Initial zeroed guard bytes and MMIO
+are test assumptions; the live ATF state must not be inferred from them.
+
+Still missing: independently verified domain permission initialization,
+readback through an established interface, reset ownership and the complete
+shared-memory policy. No production EMI transport or boot call is enabled.
 
 Checked remap transaction
 ~~~~~~~~~~~~~~~~~~~~~~~~~

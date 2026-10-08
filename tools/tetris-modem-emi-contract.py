@@ -8,14 +8,85 @@ from pathlib import Path
 import struct
 
 from capstone import Cs, CS_ARCH_ARM64, CS_MODE_ARM
-from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE
+from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, UC_HOOK_MEM_WRITE
 from unicorn.arm64_const import UC_ARM64_REG_X0, UC_ARM64_REG_X1
 from unicorn.arm64_const import UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_ARM64_REG_LR
+from unicorn.arm64_const import UC_ARM64_REG_SP
 
 ATF_HASH = "05a247cb02696ce4fe1982ea00bba81236c352146c307159d3f9e380635ea32e"
 LK_HASH = "431e0551382e21f4edfb8ff3ca05cd67b177d40b1a51f9e863965eea58f8b94a"
 BASE = 0x48800000
 ENTRY = 0x308AC
+
+
+def audit_range_handler(atf):
+    """Run real handler code against zeroed synthetic BSS and fake MMIO only."""
+    assert struct.unpack_from("<4I", atf, 0x4771C) == (8, 10, 11, 19)
+    mmio, stack, done = 0x10351000, 0x70000000, BASE + 0x308D8
+    results = []
+
+    def fixture():
+        machine = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        machine.mem_map(BASE, 0x100000)
+        machine.mem_write(BASE, atf)
+        machine.mem_map(stack, 0x10000)
+        machine.mem_map(mmio, 4096)
+        writes, stops = [], []
+
+        def write(uc, access, address, size, value, context):
+            if mmio <= address < mmio + 4096:
+                writes.append((address, size, value))
+
+        def stop(uc, address, size, context):
+            if address == done:
+                stops.append(address)
+                uc.emu_stop()
+
+        machine.hook_add(UC_HOOK_MEM_WRITE, write)
+        machine.hook_add(UC_HOOK_CODE, stop)
+        return machine, writes, stops
+
+    def invoke(machine, writes, stops, start, end, slot, operation=0):
+        writes.clear()
+        stops.clear()
+        for register, value in zip((UC_ARM64_REG_X0, UC_ARM64_REG_X1,
+                                    UC_ARM64_REG_X2, UC_ARM64_REG_X3),
+                                   (operation, start, end, slot)):
+            machine.reg_write(register, value)
+        machine.reg_write(UC_ARM64_REG_SP, stack + 0x8000)
+        machine.reg_write(UC_ARM64_REG_LR, done)
+        machine.emu_start(BASE + ENTRY, BASE + len(atf), count=512)
+        assert stops == [done], "handler exceeded instruction budget"
+        value = machine.reg_read(UC_ARM64_REG_X0)
+        return value - (1 << 64) if value & (1 << 63) else value
+
+    for slot in range(32, 44):
+        machine, writes, stops = fixture()
+        assert invoke(machine, writes, stops, 0x80000, 0x81000, slot) == 0
+        enable = mmio + 0x2A4 + ((slot - 1) // 32) * 4
+        expected = [(mmio + (slot - 1) * 8, 4, 0x40000),
+                    (mmio + (slot - 1) * 8 + 4, 4, 0x80041000),
+                    (enable, 4, 1 << ((slot - 1) % 32))]
+        assert writes == expected, (slot, writes)
+        assert invoke(machine, writes, stops, 0x80000, 0x81000, slot) == -4
+        assert not writes, "second call touched MMIO"
+        assert invoke(machine, writes, stops, slot, 0, 0, operation=1) == -1
+        assert not writes, "modem-slot disable touched MMIO"
+        results.append({"slot": slot, "first": 0, "second": -4,
+                        "disable": -1,
+                        "first_mmio_writes": expected})
+    for start, end, slot in ((0x3FFFF, 0x81000, 32),
+                              (0x81000, 0x80000, 32),
+                              (0x80000, 0x81000, 0),
+                              (0x80000, 0x81000, 64)):
+        machine, writes, stops = fixture()
+        assert invoke(machine, writes, stops, start, end, slot) == -3
+        assert not writes
+    # The firmware silently masks high page bits; the loader must reject them.
+    machine, writes, stops = fixture()
+    assert invoke(machine, writes, stops, 0x1080000, 0x1081000, 32) == 0
+    assert writes[0][2] == 0x40000 and writes[1][2] == 0x80041000
+    return results
 
 
 def payload(path, expected):
@@ -79,9 +150,11 @@ def main():
             assert stopped == [0x308D8] and values[0] == (1 << 64) - 2
         results.append({"operation": operation, "stop_offset": hex(stopped[0]),
                         "x0": hex(values[0])})
+    ranges = audit_range_handler(atf)
     print(json.dumps({"atf_sha256": ATF_HASH, "lk_sha256": LK_HASH,
                       "result": "PASS", "dispatch": results,
-                      "scope": "dispatch only; helpers and hardware not executed",
+                      "range_handler": ranges,
+                      "scope": "offline dispatch and range handler; synthetic BSS/MMIO only",
                       "lk_operation_6_return": "ignored before operation 0"}, indent=2))
 
 
