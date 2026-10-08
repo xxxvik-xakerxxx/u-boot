@@ -512,6 +512,29 @@ are payload-relative, not phone-write instructions. No state is changed on
 hardware. This verifies conditional routing, not the actual boot-stage state
 on the phone or the complete modem protection policy.
 
+Pinned core policy candidate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tetris_modem_plan_emi_policy()`` accepts the verified declared-image SHA256
+``5d2bedd00049fced983d3ae53989616c5c9f46c4eddd32a01a1ad46ff8d2c50f``
+of the privately acquired preloader. It is not a universal MT6878 profile.
+The GFH image declares load address ``0x02000f00``, size ``0xd0b9c``; policy
+table VA ``0x020bf058`` has 64 rows, stride ``0x410``. Both table walkers were
+executed offline with their writer intercepted, matching parsed records.
+
+For AIDs (35,47,93), slots 32..38 request (RO,RO,No), (RO,RO,No),
+(RW,RW,No), (RW,RO,No), (RW,RW,RW), (RW,RO,RO), (RO,RW,RW).
+The planner requires all other AIDs denied and packs eight words for the
+checked transaction. This is a strict acceptance policy: preloader uses OR
+updates, so the table alone does not prove reset defaults. The live readbacks
+must match; never relax them to accept unexplained additional access.
+
+Unknown hashes, shared-memory slots 39/41..43 and dynamic padding slot 40
+are rejected with unchanged output. Selecting the actually booted preloader,
+its matching ATF and the remaining policy/ownership chain is still mandatory.
+No boot caller is added. The pmOS repository records the complete sparse table
+and reproducible audit in ``patches/modem/test-preloader-emi-policy.py``.
+
 Checked range transaction
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

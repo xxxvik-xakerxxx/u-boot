@@ -27,6 +27,19 @@ struct tetris_modem_emi_ops {
 };
 
 /*
+ * Candidate cold-state policy for core slots 32..38 only, from preloader
+ * image SHA256 5d2bedd0...8d2c50f (GFH header plus declared image).
+ * Caller supplies a verified image digest, not an assumed firmware version.
+ * Unknown images, shared-memory slots and dynamic padding fail closed.
+ * Unlisted AIDs are expected denied: this is an acceptance condition, NOT
+ * evidence of reset defaults. The transaction must verify every field.
+ * No hardware writes; output remains unchanged on failure.
+ */
+int tetris_modem_plan_emi_policy(const unsigned char preloader_sha256[32],
+		unsigned int slot,
+		unsigned long long policy[TETRIS_MODEM_EMI_POLICY_WORDS]);
+
+/*
  * Range transaction for pinned BL_EMIMPU_CONTROL; no permission preset writes.
  * Policy is eight packed words, two bits per domain, supplied independently
  * by a verified platform policy. Never learn/approve it from current readback.

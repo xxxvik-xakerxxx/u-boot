@@ -27,9 +27,42 @@ program.argtypes = [c.c_ulonglong, c.c_ulonglong, c.c_uint,
                     c.c_ulonglong, c.c_ulonglong, c.POINTER(c.c_ulonglong), c.POINTER(Ops),
                     c.POINTER(Transaction)]
 program.restype = c.c_int
+plan_policy = library.tetris_modem_plan_emi_policy
+plan_policy.argtypes = [c.POINTER(c.c_ubyte), c.c_uint, c.POINTER(c.c_ulonglong)]
+plan_policy.restype = c.c_int
+PRELOADER_SHA = bytes.fromhex("5d2bedd00049fced983d3ae53989616c5c9f46c4eddd32a01a1ad46ff8d2c50f")
 
 
 class EmiTransactionTest(unittest.TestCase):
+    def test_pinned_core_policy_and_transaction(self):
+        digest = (c.c_ubyte * 32).from_buffer_copy(PRELOADER_SHA)
+        permissions = ((2, 2, 0), (2, 2, 0), (3, 3, 0), (3, 2, 0),
+                       (3, 3, 3), (3, 2, 2), (2, 3, 3))
+        for slot, values in enumerate(permissions, 32):
+            policy = (c.c_ulonglong * 8)()
+            self.assertEqual(plan_policy(digest, slot, policy), 0)
+            expected = dict(zip((35, 47, 93), values))
+            for aid in range(256):
+                self.assertEqual((policy[aid // 32] >> (2 * (aid % 32))) & 3,
+                                 expected.get(aid, 0))
+            self.assertEqual(self.run_case(slot=slot, policy=policy)[0], 0)
+
+    def test_unknown_profiles_slots_and_null_policy(self):
+        digest = (c.c_ubyte * 32).from_buffer_copy(PRELOADER_SHA)
+        policy = (c.c_ulonglong * 8)(*([0x55] * 8))
+        before = bytes(policy)
+        for slot in (0, 31, 39, 40, 41, 42, 43, 64, 2**32 - 1):
+            self.assertEqual(plan_policy(digest, slot, policy), -errno.EOPNOTSUPP)
+            self.assertEqual(bytes(policy), before)
+        for bit in range(256):
+            wrong = bytearray(PRELOADER_SHA)
+            wrong[bit // 8] ^= 1 << (bit % 8)
+            mutated = (c.c_ubyte * 32).from_buffer_copy(wrong)
+            self.assertEqual(plan_policy(mutated, 32, policy), -errno.EOPNOTSUPP)
+            self.assertEqual(bytes(policy), before)
+        self.assertEqual(plan_policy(None, 32, policy), -errno.EINVAL)
+        self.assertEqual(plan_policy(digest, 32, None), -errno.EINVAL)
+
     def run_case(self, start=0x80000000, size=0x200000, slot=32,
                  base=0x80000000, capacity=0x20000000, state=0,
                  corrupt=None, transport=None, missing=None, policy=None):
