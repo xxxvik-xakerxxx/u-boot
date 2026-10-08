@@ -328,7 +328,8 @@ that EMI permissions or modem-side cache/reset state are correct.
 
 Native CI tests cover rounded ranges at several line sizes, addresses above
 4 GiB, invalid bounds and stopping at either injected callback failure.
-Results for the cache addition are pending CI. The slot loader remains
+The cache addition passed native tests and the ARM64 build in CI 37669848770
+at ``668a4a2558``. The slot loader remains
 unwired to automatic boot; secure protection and reset handoff are outstanding.
 
 CCCI memory-map encoding
@@ -350,8 +351,9 @@ constant. The maximum serialized table is 768 bytes, below the vendor
 consumer's 1024-byte buffer.
 
 CI tests compare every byte, check guards and rejected malformed maps, and
-feed an encoded table into the existing real CCCI handoff validator. Results
-for this addition are pending. No DT tag descriptor, readiness marker or
+feed an encoded table into the existing real CCCI handoff validator. These
+tests and the ARM64 build passed CI 37669848770 at ``668a4a2558``.
+No DT tag descriptor, readiness marker or
 modem consumer is enabled: the complete shared-memory layout and secure
 protection/reset handoff are still required before publication to Linux.
 
@@ -465,6 +467,33 @@ the platform selector ``0x16ea0`` returns 2, selecting ``0x82000415`` command 0.
 Staging success must not be reported as an applied MPU policy. CI tests cover
 every representable aligned nonzero remap window, DRAM endpoints, undersized
 reservations, unaligned/overflowing addresses and unchanged output on errors.
+
+LK/ATF EMI operation mismatch
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Offline audit on 2026-10-08 found that copying the LK permission-selector
+call would be incorrect for the hash-pinned ATF above. LK ``0x818b8`` tests
+row flag bit 1 and calls ``0x7ee38`` with slot and row ID. That helper requests
+``0x82000415`` operation 6. At ``0x818c4`` the caller branches directly to
+range programming through ``0x7ef84``, without checking the operation-6 result.
+
+The ATF SIP table entry at ``0x58e88`` names
+``MTK_SIP_BL_EMIMPU_CONTROL`` and selects handler ``0x308ac`` (linked base
+``0x48800000``). It accepts operation 0, forwarding start/end pages and slot
+to ``0x2f618``, and operation 1, forwarding its argument to ``0x2ed24``.
+Other operations return -2, including operation 6. This is a dispatch result,
+not evidence that operation 0 establishes the complete modem permissions.
+
+Reproduce with ``tools/tetris-modem-emi-contract.py --atf PATH --lk PATH``
+using Python with Capstone and Unicorn. It verifies both payload hashes and
+the LK instructions, then emulates only the bounded ATF dispatch. It stops
+before either helper or hardware access. Operations 0 through 15 and the
+all-ones input passed the offline check; no device SMC was issued. The tool
+requires the local stock binaries, which are not redistributed in CI.
+
+Do not add an operation-6 success requirement or suppress its error as if
+permissions were installed. The next prerequisite is tracing operation 0's
+slot-specific policy and readback, not guessing missing permission masks.
 
 Checked remap transaction
 ~~~~~~~~~~~~~~~~~~~~~~~~~
