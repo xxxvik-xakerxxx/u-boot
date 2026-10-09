@@ -3,6 +3,7 @@
 obj-y	+= mt6878_tetris.o
 obj-$(CONFIG_TETRIS_MODEM_RESERVE_DIAGNOSTIC) += tetris_modem_reserve.o
 obj-$(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC) += tetris_modem_load.o
+obj-$(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC) += tetris_modem_bootstrap.o tetris_modem_boot_secure.o
 obj-$(CONFIG_TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC) += tetris_modem_observe.o
 obj-$(CONFIG_TETRIS_SCP_HANDOFF_INVENTORY) += tetris_scp_handoff.o
 obj-$(CONFIG_TETRIS_SCP_CRYPTO) += tetris_scp_crypto.o
