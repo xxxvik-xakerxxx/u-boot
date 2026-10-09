@@ -886,3 +886,7 @@ This is not a boot caller. The destination reservation, actual shared-memory
 allocation/zeroing, effective gear policy, rollback/SKU policy, full protection
 and remap transaction, ready-tag publication and secure-reset release are still
 required. No modem activation or new phone/SIM support is claimed.
+
+CI ``37883464473`` passed native verification tests, ARM64 build and LK
+packaging for source ``30e73368db6477708cad54148c70ce33ab621bd7``.
+This artifact was not installed; the proven SCP-enabled loader is retained.
