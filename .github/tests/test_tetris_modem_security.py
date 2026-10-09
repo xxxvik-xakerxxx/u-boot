@@ -189,11 +189,12 @@ class ModemSecurityTest(unittest.TestCase):
         for consys in (0, 65, 0xd80000):
             plan, banks = self.smem_fixture(consys)
             calls = []
+            cleared = []
 
             @Flush
             def flush(ctx, start, end):
                 calls.append((start, end))
-                self.assertEqual(c.string_at(start, end - start), bytes(end - start))
+                cleared.append(c.string_at(start, end - start) == bytes(end - start))
                 return 0
 
             cache_ops = CacheOps(flush, None)
@@ -207,6 +208,7 @@ class ModemSecurityTest(unittest.TestCase):
             self.assertEqual(c.string_at(cache[1], preserve), b"\xa5" * preserve)
             self.assertEqual(calls, [(nc[1], nc[1] + nc[2]),
                                      (cache[1] + preserve, cache[1] + cache[2])])
+            self.assertEqual(cleared, [True, True])
             for _, address, size in banks:
                 self.assertEqual(c.string_at(address - 1, 1), b"\xa5")
                 self.assertEqual(c.string_at(address + size, 1), b"\xa5")
