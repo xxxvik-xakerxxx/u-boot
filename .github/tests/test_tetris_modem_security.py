@@ -218,6 +218,27 @@ class ModemSecurityTest(unittest.TestCase):
         self.assertLess(service_banks_native(c.byref(plan), 512 << 20, c.byref(banks)), 0)
         self.assertEqual(bytes(banks), before)
 
+    @unittest.skipUnless(service_banks_native, "physical service-bank planning executes in CI")
+    def test_real_sized_firmware_requires_separate_services(self):
+        data = b"".join(self.signed_groups(smem_fields={0x180: 0xd80000,
+                                                       0x18c: 0x163780}))
+        prepared = PreparedBundle()
+        self.assertEqual(prepare_native(data, len(data), bytes.fromhex(self.fixture.root_pin),
+                                        c.byref(ops), 0x4000, 1, c.byref(prepared)), 0)
+        plan = BootPlan(prepared.bundle.layout, prepared.inputs, prepared.smem)
+        plan.layout.memory_size = 480 << 20
+        banks = ServiceBanks()
+        before = bytes(banks)
+        self.assertLess(service_banks_native(c.byref(plan), 512 << 20, c.byref(banks)), 0)
+        self.assertEqual(bytes(banks), before)
+        self.assertEqual(service_banks_native(c.byref(plan), c.c_size_t(-1).value,
+                                             c.byref(banks)), 0)
+        self.assertEqual(banks.firmware_capacity, 480 << 20)
+        self.assertEqual(banks.nc_capacity, plan.smem.nc_capacity)
+        self.assertEqual(banks.cache_capacity, plan.smem.cache_capacity)
+        self.assertGreater(banks.nc_capacity + banks.cache_capacity, 32 << 20)
+        self.assertEqual((banks.nc_capacity + banks.cache_capacity) % 0x10000, 0)
+
     @unittest.skipUnless(initialize_smem_native, "service RAM initialization executes in CI")
     def test_smem_initialize_preserves_consys_and_firmware(self):
         for consys in (0, 65, 0xd80000):

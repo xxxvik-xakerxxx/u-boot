@@ -122,6 +122,76 @@ int main(void)
 			unchanged_failure(fdt, 1);
 		}
 	}
+	/* Real-sized service banks do not consume the fixed modem window. */
+	fresh(fdt);
+	assert(!tetris_modem_reserve(fdt, &ops));
+	{
+		const unsigned long long capacity = 0x2800000;
+		unsigned char before[4096];
+		unsigned long long modem_base = allocation;
+
+		memcpy(before, fdt, sizeof(before));
+		allocations = releases = 0;
+		assert(reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
+				      capacity, 0x10000) == -EEXIST);
+		assert(!memcmp(before, fdt, sizeof(before)));
+		assert(allocations == 1 && releases == 1);
+		allocation = modem_base + TETRIS_MODEM_WINDOW;
+		allocations = releases = 0;
+		assert(!reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
+				       capacity, 0x10000));
+		assert(allocations == 1 && !releases);
+		node = fdt_path_offset(fdt,
+			"/reserved-memory/tetris-modem-service-diagnostic");
+		assert(node >= 0);
+		reg = fdt_getprop(fdt, node, "reg", &len);
+		assert(reg && len == 16 && read_pair(reg) == allocation);
+		assert(read_pair(reg + 2) == capacity);
+		assert(fdt_num_mem_rsv(fdt) == 2);
+		assert(!fdt_get_mem_rsv(fdt, 1, &start, &size));
+		assert(start == allocation && size == capacity);
+		memcpy(before, fdt, sizeof(before));
+		allocations = releases = 0;
+		assert(reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
+				      capacity, 0x10000) == -EEXIST);
+		assert(!allocations && !releases);
+		assert(!memcmp(before, fdt, sizeof(before)));
+	}
+	for (i = 0; i < 5; i++) {
+		unsigned char before[4096];
+		unsigned long long capacity = i == 0 ? 0 : i == 1 ? 1 :
+			i == 2 ? TETRIS_MODEM_LIMIT + 1 : 0x2800000;
+		unsigned long long alignment = i == 3 ? 0 : i == 4 ? 3 : 0x10000;
+
+		fresh(fdt);
+		memcpy(before, fdt, sizeof(before));
+		assert(reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
+				      capacity, alignment) == -EINVAL);
+		assert(!allocations && !releases);
+		assert(!memcmp(before, fdt, sizeof(before)));
+	}
+	/* Service DT space failures release only the new allocation. */
+	for (i = 0; i < 256; i++) {
+		unsigned char before[4096];
+		int ret;
+
+		fresh(fdt);
+		assert(!tetris_modem_reserve(fdt, &ops));
+		allocation += TETRIS_MODEM_WINDOW;
+		allocations = releases = 0;
+		assert(!fdt_pack(fdt));
+		fdt_set_totalsize(fdt, fdt_totalsize(fdt) + i);
+		memcpy(before, fdt, sizeof(before));
+		ret = reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
+				     0x2800000, 0x10000);
+		assert(allocations == 1);
+		if (ret) {
+			assert(releases == 1);
+			assert(!memcmp(before, fdt, sizeof(before)));
+		} else {
+			assert(!releases);
+		}
+	}
 	puts("modem reservation: allocation, conflicts and atomic DT publication passed");
 	return 0;
 }

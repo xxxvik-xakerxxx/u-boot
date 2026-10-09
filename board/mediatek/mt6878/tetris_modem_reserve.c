@@ -23,7 +23,8 @@ static unsigned long long read_pair(const fdt32_t *p)
 	       fdt32_to_cpu(p[1]);
 }
 
-static int check_tree(const void *fdt, unsigned long long base)
+static int check_tree(const void *fdt, const char *name,
+		      unsigned long long base, unsigned long long capacity)
 {
 	int parent, node, len, i, count;
 	const fdt32_t *reg;
@@ -41,7 +42,7 @@ static int check_tree(const void *fdt, unsigned long long base)
 	ranges = fdt_getprop(fdt, parent, "ranges", &len);
 	if (!ranges || len)
 		return -FDT_ERR_BADVALUE;
-	if (fdt_subnode_offset(fdt, parent, "tetris-modem-diagnostic") !=
+	if (fdt_subnode_offset(fdt, parent, name) !=
 	    -FDT_ERR_NOTFOUND)
 		return -EEXIST;
 	fdt_for_each_subnode(node, fdt, parent) {
@@ -55,7 +56,7 @@ static int check_tree(const void *fdt, unsigned long long base)
 			size = read_pair(reg + i + 2);
 			if (!size || start + size < start)
 				return -FDT_ERR_BADVALUE;
-			if (base && start < base + TETRIS_MODEM_WINDOW &&
+			if (base && start < base + capacity &&
 			    base < start + size)
 				return -EEXIST;
 		}
@@ -70,26 +71,30 @@ static int check_tree(const void *fdt, unsigned long long base)
 			return -FDT_ERR_BADVALUE;
 		if (!length || address + length < address)
 			return -FDT_ERR_BADVALUE;
-		if (base && address < base + TETRIS_MODEM_WINDOW &&
+		if (base && address < base + capacity &&
 		    base < address + length)
 			return -EEXIST;
 	}
 	return 0;
 }
 
-int tetris_modem_reserve(void *fdt, const struct tetris_modem_allocator *ops)
+static int reserve_region(void *fdt, const struct tetris_modem_allocator *ops,
+			  const char *name, unsigned long long capacity,
+			  unsigned long long alignment)
 {
 	unsigned long long base = 0;
 	fdt32_t reg[4];
 	void *copy;
 	int ret, bytes, node;
 
-	if (!fdt || !ops || !ops->alloc || !ops->release)
+	if (!fdt || !ops || !ops->alloc || !ops->release || !name ||
+	    !capacity || capacity > TETRIS_MODEM_LIMIT || !alignment ||
+	    (alignment & (alignment - 1)) || capacity % alignment)
 		return -EINVAL;
 	ret = fdt_check_header(fdt);
 	if (ret)
 		return ret;
-	ret = check_tree(fdt, 0);
+	ret = check_tree(fdt, name, 0, capacity);
 	if (ret)
 		return ret;
 	bytes = fdt_totalsize(fdt);
@@ -102,29 +107,29 @@ int tetris_modem_reserve(void *fdt, const struct tetris_modem_allocator *ops)
 	ret = ops->alloc(ops->ctx, &base);
 	if (ret)
 		goto out;
-	if (!base || base % TETRIS_MODEM_ALIGN ||
-	    base > TETRIS_MODEM_LIMIT - TETRIS_MODEM_WINDOW) {
+	if (!base || base % alignment ||
+	    base > TETRIS_MODEM_LIMIT - capacity) {
 		ret = -ERANGE;
 		goto release;
 	}
-	ret = check_tree(copy, base);
+	ret = check_tree(copy, name, base, capacity);
 	if (ret)
 		goto release;
 	node = fdt_path_offset(copy, "/reserved-memory");
-	node = fdt_add_subnode(copy, node, "tetris-modem-diagnostic");
+	node = fdt_add_subnode(copy, node, name);
 	if (node < 0) {
 		ret = node;
 		goto release;
 	}
 	reg[0] = cpu_to_fdt32(base >> 32);
 	reg[1] = cpu_to_fdt32(base);
-	reg[2] = 0;
-	reg[3] = cpu_to_fdt32(TETRIS_MODEM_WINDOW);
+	reg[2] = cpu_to_fdt32(capacity >> 32);
+	reg[3] = cpu_to_fdt32(capacity);
 	ret = fdt_setprop(copy, node, "reg", reg, sizeof(reg));
 	if (!ret)
 		ret = fdt_setprop(copy, node, "no-map", NULL, 0);
 	if (!ret)
-		ret = fdt_add_mem_rsv(copy, base, TETRIS_MODEM_WINDOW);
+		ret = fdt_add_mem_rsv(copy, base, capacity);
 	if (ret)
 		goto release;
 	/* Publish only after every mutation succeeds; no partial Linux carveout. */
@@ -137,34 +142,47 @@ out:
 	return ret;
 }
 
+int tetris_modem_reserve(void *fdt, const struct tetris_modem_allocator *ops)
+{
+	return reserve_region(fdt, ops, "tetris-modem-diagnostic",
+			      TETRIS_MODEM_WINDOW, TETRIS_MODEM_ALIGN);
+}
+
 #ifndef TETRIS_MODEM_RESERVE_HOST_TEST
+struct window_allocation {
+	unsigned long long capacity;
+	unsigned long long alignment;
+	unsigned long long base;
+};
+
 static void release_window(void *ctx, unsigned long long base)
 {
+	const struct window_allocation *allocation = ctx;
 	long ret;
 
-	ret = lmb_free(base, TETRIS_MODEM_WINDOW, LMB_NOMAP | LMB_NOOVERWRITE);
+	ret = lmb_free(base, allocation->capacity, LMB_NOMAP | LMB_NOOVERWRITE);
 	if (ret)
 		printf("Tetris modem RAM release failed: %ld\n", ret);
 }
 
 static int allocate_window(void *ctx, unsigned long long *result)
 {
+	struct window_allocation *allocation = ctx;
 	phys_addr_t base = TETRIS_MODEM_LIMIT;
 	unsigned long long start, size;
 	int ret, i;
 
-	ret = lmb_alloc_mem(LMB_MEM_ALLOC_MAX, TETRIS_MODEM_ALIGN, &base,
-			    TETRIS_MODEM_WINDOW, LMB_NOMAP | LMB_NOOVERWRITE);
+	ret = lmb_alloc_mem(LMB_MEM_ALLOC_MAX, allocation->alignment, &base,
+			    allocation->capacity, LMB_NOMAP | LMB_NOOVERWRITE);
 	if (ret)
 		return ret;
 	for (i = 0; i < CONFIG_NR_DRAM_BANKS; i++) {
 		start = gd->bd->bi_dram[i].start;
 		size = gd->bd->bi_dram[i].size;
-		if (size >= TETRIS_MODEM_WINDOW && base >= start &&
-		    base - start <= size - TETRIS_MODEM_WINDOW) {
+		if (size >= allocation->capacity && base >= start &&
+		    base - start <= size - allocation->capacity) {
 			*result = base;
-			if (ctx)
-				*(unsigned long long *)ctx = base;
+			allocation->base = base;
 			return 0;
 		}
 	}
@@ -174,21 +192,21 @@ static int allocate_window(void *ctx, unsigned long long *result)
 
 int tetris_modem_reserve_diagnostic(void *fdt)
 {
-	const struct tetris_modem_allocator ops = {
-		.alloc = allocate_window,
-		.release = release_window,
-	};
+	unsigned long long base;
 
-	return tetris_modem_reserve(fdt, &ops);
+	return tetris_modem_reserve_diagnostic_window(fdt, &base);
 }
 
 int tetris_modem_reserve_diagnostic_window(void *fdt, unsigned long long *base)
 {
-	unsigned long long allocated = 0;
+	struct window_allocation allocation = {
+		.capacity = TETRIS_MODEM_WINDOW,
+		.alignment = TETRIS_MODEM_ALIGN,
+	};
 	const struct tetris_modem_allocator ops = {
 		.alloc = allocate_window,
 		.release = release_window,
-		.ctx = &allocated,
+		.ctx = &allocation,
 	};
 	int ret;
 
@@ -196,7 +214,30 @@ int tetris_modem_reserve_diagnostic_window(void *fdt, unsigned long long *base)
 		return -EINVAL;
 	ret = tetris_modem_reserve(fdt, &ops);
 	if (!ret)
-		*base = allocated;
+		*base = allocation.base;
+	return ret;
+}
+
+int tetris_modem_reserve_services(void *fdt, unsigned long long capacity,
+				 unsigned long long *base)
+{
+	struct window_allocation allocation = {
+		.capacity = capacity,
+		.alignment = 0x10000,
+	};
+	const struct tetris_modem_allocator ops = {
+		.alloc = allocate_window,
+		.release = release_window,
+		.ctx = &allocation,
+	};
+	int ret;
+
+	if (!base)
+		return -EINVAL;
+	ret = reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
+			     capacity, allocation.alignment);
+	if (!ret)
+		*base = allocation.base;
 	return ret;
 }
 #endif

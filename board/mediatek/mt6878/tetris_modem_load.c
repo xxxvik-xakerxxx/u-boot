@@ -58,8 +58,9 @@ int tetris_modem_load_diagnostic(void *fdt)
 	struct tetris_modem_service_banks banks;
 	struct tetris_modem_boot_plan plan;
 	struct blk_desc *dev;
-	unsigned long long base;
-	unsigned char *window = NULL;
+	unsigned long long base, service_base;
+	size_t service_capacity;
+	unsigned char *window = NULL, *services = NULL;
 	const char *stage = "device";
 	int ret, chosen;
 
@@ -88,14 +89,31 @@ int tetris_modem_load_diagnostic(void *fdt)
 	if (ret)
 		goto out;
 	stage = "service-layout";
-	ret = tetris_modem_plan_service_banks_b41(&plan, TETRIS_MODEM_WINDOW, &banks);
+	/* Services are separate from the fixed ATF modem-remap window. */
+	ret = tetris_modem_plan_service_banks_b41(&plan, (size_t)-1, &banks);
 	if (ret)
 		goto out;
+	if (banks.nc_capacity > (size_t)-1 - banks.cache_capacity) {
+		ret = -EOVERFLOW;
+		goto out;
+	}
+	service_capacity = banks.nc_capacity + banks.cache_capacity;
+	stage = "service-reservation";
+	ret = tetris_modem_reserve_services(fdt, service_capacity, &service_base);
+	if (ret)
+		goto out;
+	services = map_sysmem(service_base, service_capacity);
+	if (!services) {
+		ret = -ENOMEM;
+		goto out;
+	}
 	stage = "service-initialization";
-	ret = tetris_modem_initialize_smem_b41(&plan, window, banks.firmware_capacity,
-		window + banks.nc_offset, banks.nc_capacity,
-		window + banks.cache_offset, banks.cache_capacity, ARCH_DMA_MINALIGN, &cache);
+	ret = tetris_modem_initialize_smem_b41(&plan, window, TETRIS_MODEM_WINDOW,
+		services, banks.nc_capacity,
+		services + banks.nc_capacity, banks.cache_capacity, ARCH_DMA_MINALIGN, &cache);
 out:
+	if (services)
+		unmap_sysmem(services);
 	if (window)
 		unmap_sysmem(window);
 	/* Keep any acquired window reserved, including after a post-copy failure. */

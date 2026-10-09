@@ -929,10 +929,11 @@ the operator must establish execution from ``lk_a`` before installation. The
 profile additionally verifies slot-A boot-control metadata, uses the board's
 UFS descriptor and reads only ``misc`` and ``modem_a``. It never writes storage.
 
-One fresh 512 MiB LMB window is reserved transactionally in the Linux DT.
-Authenticated metadata determines firmware, NC and cache-bank placement;
-their complete 64 KiB-aligned extents must fit in that window. Signature and
-metadata validation precede payload writes. ROM/DSP and cleared service RAM
+One fresh 512 MiB LMB window is reserved transactionally in the Linux DT for
+firmware. Authenticated metadata determines the service-bank sizes; a second,
+disjoint LMB reservation holds the complete 64 KiB-aligned NC and cache banks.
+Both reservations carry ``no-map`` and a matching FDT memory reservation.
+Signature and metadata validation precede payload writes. ROM/DSP and cleared service RAM
 are synchronized before reporting ``ram-loaded-not-started``. Any acquired
 window remains reserved on failure, including a cache or reporting failure.
 There is one attempt per boot, without retrying partially prepared memory.
@@ -957,3 +958,17 @@ BSD network interface. SSH and the outgoing modem-load diagnostics remain
 unavailable; neither preparation success nor a boot regression is established.
 No further hardware experiment was attempted, and physical USB reconnect was
 requested. The prior SCP-enabled ``fef0154b`` CI image is retained for rollback.
+
+After physical USB reconnect, SSH recovered on the unchanged r173 image.
+The live result was ``service-layout``, ``-ENOSPC``, ``failed-not-started``:
+partition read, signature verification and ROM/DSP placement completed, but
+the one-window service plan did not fit. Bounded header reads derived their
+offset from the actual ``md1rom`` container and confirmed 480 MiB MD memory,
+CONSYS size ``0xd80000``, NV cache size ``0x163780`` and UDC disabled. These
+are test vectors, not board constants or a substitute for authentication.
+The bank correction preserves the fixed ATF modem-remap reservation and
+allocates services separately instead of increasing or overlapping it.
+Native tests cover this real-sized layout, sibling conflicts, invalid sizes,
+duplicate publication and every available DT-space boundary. CI and live
+testing of the correction remain pending. The sensor service rejected the
+warm SCP handoff; no reload was attempted and a cold start remains necessary.
