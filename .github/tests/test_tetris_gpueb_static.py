@@ -2,12 +2,14 @@
 # SPDX-License-Identifier: GPL-2.0+
 """Cheap source/fixture gates; no compiler or hardware access."""
 import ast
+import hashlib
 from pathlib import Path
 import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 BOARD = ROOT / "board/mediatek/mt6878"
+SECURITY_BASELINE_SHA256 = "ecc93a78efbcecfedcf8c8cc2b24aa74017f3dec0dfc39cc6cee41b84035a684"
 
 
 def body(source, name):
@@ -24,12 +26,14 @@ def body(source, name):
 class Static(unittest.TestCase):
     def test_existing_security_behaviour_unchanged(self):
         path = "board/mediatek/mt6878/tetris_scp_security.c"
-        baseline = subprocess.check_output(["git", "show", "HEAD:" + path],
-                                           cwd=ROOT, text=True)
         current = (ROOT / path).read_text()
-        for name in ("tetris_scp_authenticate", "tetris_modem_verify_signature",
-                     "tetris_scp_prepare_component"):
-            self.assertEqual(body(current, name), body(baseline, name))
+        # Remove only the new entry point; pin every pre-existing security byte
+        # independently of checkout history and the current commit.
+        added = body(current, "tetris_gpueb_authenticate") + "\n\n"
+        self.assertEqual(current.count(added), 1)
+        baseline = current.replace(added, "", 1)
+        self.assertEqual(hashlib.sha256(baseline.encode()).hexdigest(),
+                         SECURITY_BASELINE_SHA256)
 
     def test_no_registration_or_hardware_boot_and_one_transform(self):
         source = (BOARD / "tetris_gpueb_prepare.c").read_text()
