@@ -469,7 +469,9 @@ With effective gear 1, the cache profile has a ``0x15fc0`` padding gap before
 CCB, six runtime rows and capacity ``0x2560000``. The oracle now contains
 42 parameter combinations / 84 executed bank plans. Synthetic signed-bundle
 tests cover these field values, signed unsupported metadata, tampering,
-unknown gears, wrong trust and output aliasing. New native CI is pending.
+unknown gears, wrong trust and output aliasing. CI ``37797407178`` passed the
+native tests, ARM64 build and packaging for
+``e05970e905c08b54be88d281854d56f70f1b88bc``.
 
 This gap exceeds the old consumer's page-rounding allowance. pmOS r173 adds
 ``0173-vendor-ccci-smem-map-span.patch.vendor`` to map the full contiguous
