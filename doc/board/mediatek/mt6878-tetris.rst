@@ -461,8 +461,11 @@ Evidence is actual LK tag publication ``0x24370..0x243e8``. The private-image
 oracle can run this exact code with ``test-lk-smem-plan.py --modem``. The checked
 local modem container hash is
 ``b15207a948125439a5957224d65774d9d44c558c6eb285372a520b27b8d7d6c5``;
-offline signature consistency passed, using image-derived trust only for that
-comparison, not as device root provisioning.
+all ROM/DRDI/DSP signatures passed offline verification with the independently
+LK-matched SPKI pin already recorded in ``tetris_scp_prepare.c``:
+``e1b5235d9411473a358c754f84843801b91f05b8fb9dc4863393e378e41a115e``.
+This establishes the audited root for these images, not rollback/device policy
+or permission to release reset.
 
 Observed metadata is DRDI 3, UDC 0, CONSYS ``0xd80000`` and NVRAM ``0x16a040``.
 With effective gear 1, the cache profile has a ``0x15fc0`` padding gap before
