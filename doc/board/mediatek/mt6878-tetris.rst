@@ -914,6 +914,8 @@ SMC, reset release, DT activation or automatic boot caller is added.
 Native CI tests use synthetic signed firmware plus both synthetic and stock
 CONSYS sizes. They verify complete cleared ranges, untouched firmware/prefix
 and guard bytes, invalid-input no-write behavior, and first/second flush
-failures. Native and ARM64 CI are pending; no phone change or SIM/calls is
-claimed by these tests.
+failures. CI ``37895114890`` passed native tests, both ARM64 configurations,
+boot-contract checks and LK packaging at ``a92dff3a69``. No phone change or
+SIM/calls is claimed by these tests; the automatic startup caller remains
+unimplemented.
 This artifact was not installed; the proven SCP-enabled loader is retained.
