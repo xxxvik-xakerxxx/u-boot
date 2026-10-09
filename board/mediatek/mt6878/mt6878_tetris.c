@@ -185,11 +185,18 @@ struct tetris_ccci_descriptor {
 	u32 load_md_errno;
 };
 
+enum tetris_ccci_smem_mapping {
+	TETRIS_CCCI_SMEM_SUM,
+	TETRIS_CCCI_SMEM_SPAN,
+};
+
 struct tetris_ccci_access {
 	bool (*range_allowed)(u64 base, u32 size, void *context);
 	const void *(*map)(u64 base, u32 size, void *context);
 	void (*unmap)(const void *buffer, void *context);
 	void *context;
+	/* SPAN requires a consumer carrying the full-span mapping correction. */
+	enum tetris_ccci_smem_mapping smem_mapping;
 };
 
 struct tetris_ccci_core_tag {
@@ -803,7 +810,14 @@ static bool tetris_ccci_smem_mapping_allowed(const void *fdt,
 					     const struct tetris_ccci_access *access,
 					     u64 base, u32 bytes, u32 span)
 {
-	u64 rounded = ((u64)bytes + 0xfff) & ~0xfffULL;
+	u64 rounded;
+
+	if (access->smem_mapping == TETRIS_CCCI_SMEM_SPAN && bytes)
+		bytes = span;
+	else if (access->smem_mapping != TETRIS_CCCI_SMEM_SUM)
+		return false;
+
+	rounded = ((u64)bytes + 0xfff) & ~0xfffULL;
 
 	/* B4.1's mapper masks the base and rounds size to kernel pages (4 KiB). */
 	return bytes && !(base & 0xfff) && rounded <= UINT32_MAX &&
@@ -824,7 +838,9 @@ static int tetris_ccci_validate_smem_table(const void *fdt,
 	bool mapping = false, populated = false;
 	unsigned int i, j;
 
-	if (!count || count > UINT32_MAX / TETRIS_CCCI_SMEM_REGION_SIZE ||
+	if ((access->smem_mapping != TETRIS_CCCI_SMEM_SUM &&
+	     access->smem_mapping != TETRIS_CCCI_SMEM_SPAN) ||
+	    !count || count > UINT32_MAX / TETRIS_CCCI_SMEM_REGION_SIZE ||
 	    layout->size != count * TETRIS_CCCI_SMEM_REGION_SIZE) {
 		result->failure = TETRIS_CCCI_BAD_SMEM_TABLE;
 		return -EINVAL;
@@ -860,7 +876,10 @@ static int tetris_ccci_validate_smem_table(const void *fdt,
 		if (!padding && size)
 			populated = true;
 
-		/* B4.1 skips padding, then maps the sum of each ordinary run. */
+		/* The corrected consumer includes padding through the run's end. */
+		if (padding && mapping && access->smem_mapping == TETRIS_CCCI_SMEM_SPAN)
+			mapped_end = cursor;
+		/* Unpatched B4.1 maps only the sum of each ordinary run. */
 		if (!padding) {
 			if (flags & BIT(3)) {
 				if (mapping &&

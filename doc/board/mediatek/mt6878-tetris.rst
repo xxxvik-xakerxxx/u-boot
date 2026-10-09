@@ -479,8 +479,20 @@ native tests, ARM64 build and packaging for
 This gap exceeds the old consumer's page-rounding allowance. pmOS r173 adds
 ``0173-vendor-ccci-smem-map-span.patch.vendor`` to map the full contiguous
 physical/offset span including padding. The current legacy CCCI observation
-validator still rejects this large gap; a future publishing boot caller must
+validator defaults to rejecting this large gap; a future publishing boot caller must
 establish the span-mapping consumer contract before exposing these tables.
+
+The validator now has an explicit ``TETRIS_CCCI_SMEM_SPAN`` access contract
+for consumers carrying that correction. Zero-initialized access retains the
+legacy summed-size contract; the existing observation caller does not opt in.
+Span mode checks the complete run including trailing padding, page rounding,
+reserved DRAM bounds, physical/offset agreement and all existing row/ID rules.
+An empty ordinary run or unknown contract is rejected. Tests cover both the
+audited OTA NVRAM profile (``0x16a040``, gap ``0x15fc0``) and the installed
+partition profile (``0x163780``, gap ``0x1c880``), plus both contracts over
+the existing malformed-table cases. These values are test vectors only.
+Static whitespace/checkpatch validation passed; native and ARM64 CI results
+are pending. This change publishes no new tags and enables no modem execution.
 Preparation does not yet reserve RAM, place images, apply protection, release
 reset or advertise modem readiness.
 

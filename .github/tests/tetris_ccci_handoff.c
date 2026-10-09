@@ -27,6 +27,7 @@ struct fixture {
 	u32 name_size;
 	u32 tag_count;
 	bool allow_range;
+	u32 memory_size;
 	int map_calls;
 	int unmap_calls;
 };
@@ -292,6 +293,7 @@ static void fixture_init(struct fixture *fixture, bool v2, bool use_rmem)
 	memset(fixture, 0, sizeof(*fixture));
 	fixture->base = TEST_BASE;
 	fixture->allow_range = true;
+	fixture->memory_size = TEST_MEMORY_SIZE;
 	fixture->descriptor_size = TEST_TAG_SIZE;
 	fixture->header_size = v2 ? TETRIS_CCCI_V2_TAG_SIZE :
 		TETRIS_CCCI_V1_TAG_SIZE;
@@ -379,7 +381,7 @@ static bool fixture_range_allowed(u64 base, u32 size, void *context)
 	struct fixture *fixture = context;
 
 	return fixture->allow_range &&
-	       tetris_ccci_range_contains(TEST_MEMORY_BASE, TEST_MEMORY_SIZE,
+	       tetris_ccci_range_contains(TEST_MEMORY_BASE, fixture->memory_size,
 					  base, size);
 }
 
@@ -782,7 +784,7 @@ static void test_smem_mapping(void)
 	u8 rows[160], count[4];
 	struct tetris_ccci_tag_data count_tag = { count, sizeof(count) };
 	struct tetris_ccci_tag_data layout = { rows, 0 };
-	unsigned int scenario;
+	unsigned int scenario, policy;
 	int bytes, ret;
 
 	for (scenario = 0; scenario < 12; scenario++) {
@@ -840,13 +842,17 @@ static void test_smem_mapping(void)
 			put_le32(rows + 40 + 32, BIT(3));
 			break;
 		}
-		ret = tetris_ccci_validate_smem_table(fixture.fdt, &access,
-						      &count_tag, &layout, &result);
-		if (scenario < 3)
-			require(!ret, "producer rows satisfy consumer mapping contract");
-		else
-			require(ret < 0 && result.failure == TETRIS_CCCI_BAD_SMEM_TABLE,
-				"unsafe shared-memory mapping rejected");
+		for (policy = TETRIS_CCCI_SMEM_SUM; policy <= TETRIS_CCCI_SMEM_SPAN;
+		     policy++) {
+			access.smem_mapping = policy;
+			ret = tetris_ccci_validate_smem_table(fixture.fdt, &access,
+							      &count_tag, &layout, &result);
+			if (scenario < 3 || (scenario == 3 && policy == TETRIS_CCCI_SMEM_SPAN))
+				require(!ret, "producer rows satisfy consumer mapping contract");
+			else
+				require(ret < 0 && result.failure == TETRIS_CCCI_BAD_SMEM_TABLE,
+					"unsafe shared-memory mapping rejected");
+		}
 	}
 
 	fixture_init(&fixture, true, false);
@@ -899,6 +905,69 @@ static void test_b41_smem_plan(void)
 	require(!tetris_ccci_smem_mapping_allowed(fixture.fdt, &access,
 						  TEST_SMEM_BASE, 0xffffffff, 0xffffffff),
 		"mapping size wrap rejected");
+}
+
+static void test_span_smem_mapping(u32 nv_cache_size, u32 gap)
+{
+	struct fixture fixture;
+	struct tetris_ccci_access access = {
+		.range_allowed = fixture_range_allowed,
+		.context = &fixture,
+	};
+	struct tetris_modem_smem_inputs inputs = { 3, 0, 0xd80000, nv_cache_size, 1 };
+	struct tetris_modem_smem_plan plan;
+	struct tetris_ccci_result result = { 0 };
+	u8 rows[10 * TETRIS_CCCI_SMEM_REGION_SIZE], count[4];
+	struct tetris_ccci_tag_data count_tag = { count, sizeof(count) };
+	struct tetris_ccci_tag_data layout = { rows, 0 };
+	fdt32_t reg[4];
+	int bytes;
+
+	fixture_init(&fixture, true, false);
+	fixture.memory_size = 0x8000000;
+	reg[0] = cpu_to_fdt32(TEST_MEMORY_BASE >> 32);
+	reg[1] = cpu_to_fdt32(TEST_MEMORY_BASE);
+	reg[2] = 0;
+	reg[3] = cpu_to_fdt32(fixture.memory_size);
+	require(!fdt_setprop(fixture.fdt, memory_node(&fixture), "reg", reg, sizeof(reg)),
+		"extend synthetic DRAM for real-sized cache profile");
+	require(!fdt_del_mem_rsv(fixture.fdt, 0), "remove small test reservation");
+	require(!fdt_add_mem_rsv(fixture.fdt, TEST_MEMORY_BASE, fixture.memory_size),
+		"reserve synthetic DRAM");
+	require(!tetris_modem_plan_smem_b41(&inputs, &plan), "plan observed cache profile");
+	require(plan.cache[2].offset - (plan.cache[1].offset + plan.cache[1].size) == gap,
+		"profile exercises the observed large padding gap");
+	bytes = tetris_modem_encode_smem(plan.cache, ARRAY_SIZE(plan.cache), TEST_SMEM_BASE,
+					 plan.cache_capacity, 0x8000000, rows, sizeof(rows));
+	require(bytes > 0, "encode real-sized cache rows");
+	layout.size = bytes;
+	put_le32(count, plan.cache_rows);
+	require(tetris_ccci_validate_smem_table(fixture.fdt, &access, &count_tag,
+						&layout, &result) < 0,
+		"default legacy consumer rejects large gap");
+	access.smem_mapping = TETRIS_CCCI_SMEM_SPAN;
+	require(!tetris_ccci_validate_smem_table(fixture.fdt, &access, &count_tag,
+						 &layout, &result),
+		"explicit corrected consumer accepts full cache span");
+	access.smem_mapping = 2;
+	require(tetris_ccci_validate_smem_table(fixture.fdt, &access, &count_tag,
+						&layout, &result) < 0,
+		"unknown mapping contract rejected");
+	access.smem_mapping = TETRIS_CCCI_SMEM_SPAN;
+	put_le32(rows + 20, 1);
+	require(tetris_ccci_validate_smem_table(fixture.fdt, &access, &count_tag,
+						&layout, &result) < 0,
+		"span mode still rejects inconsistent physical offsets");
+	require(!tetris_ccci_smem_mapping_allowed(fixture.fdt, &access,
+						  TEST_MEMORY_BASE + fixture.memory_size - 0x1000,
+						  1, 0x1001),
+		"span rounding cannot escape reservation");
+	require(!tetris_ccci_smem_mapping_allowed(fixture.fdt, &access,
+						  TEST_SMEM_BASE, 1, 0xffffffff),
+		"span rounding overflow rejected");
+	require(!tetris_ccci_smem_mapping_allowed(fixture.fdt, &access,
+						  TEST_SMEM_BASE, 0, 0x1000),
+		"padding cannot create an empty mapping run");
 }
 
 static void test_encoded_tags(void)
@@ -1123,6 +1192,8 @@ int main(void)
 	test_encoded_tags();
 	test_smem_mapping();
 	test_b41_smem_plan();
+	test_span_smem_mapping(0x16a040, 0x15fc0);
+	test_span_smem_mapping(0x163780, 0x1c880);
 	test_publish_no_space();
 	test_tag_failures();
 	test_gnss_emi_handoff();
