@@ -969,6 +969,19 @@ are test vectors, not board constants or a substitute for authentication.
 The bank correction preserves the fixed ATF modem-remap reservation and
 allocates services separately instead of increasing or overlapping it.
 Native tests cover this real-sized layout, sibling conflicts, invalid sizes,
-duplicate publication and every available DT-space boundary. CI and live
-testing of the correction remain pending. The sensor service rejected the
-warm SCP handoff; no reload was attempted and a cold start remains necessary.
+duplicate publication and every available DT-space boundary. CI ``37902382709``
+passed at ``56de6568035ce1c874cfb1a5ad50575238dd9dd9``, including native
+certificate/service tests and both ARM64 configurations. Its archive SHA256
+``cd8546c99c0848f0122206d1fd724a2405c5bc51aebce9e25d4630fed5da98a4``
+matched GitHub; all image hashes and LK packaging checks passed.
+
+The correction was flashed to ``lk_a`` only. Readback image SHA256 matched
+``17517bfdfbf06bac27221790de0d04a7e5128d89f382f8f9c603ca7847c84038``.
+On unchanged r173, boot ``d6ac0fdc-6f2e-47e5-b5c1-54c1fd8266cd`` reports
+``service-initialization``, zero error and ``ram-loaded-not-started``.
+The DT contains the unchanged 512 MiB firmware reservation and a separate
+``0x2690000``-byte service reservation. USB/SSH and a hash-verified 32 MiB
+transfer passed; display remains connected and no critical kernel-fault
+signature was found. The sensor service rejected the warm SCP handoff;
+no reload was attempted. Full shutdown was requested for the cold-start gate.
+This is one RAM-preparation pass, not modem execution, SIM or calls.
