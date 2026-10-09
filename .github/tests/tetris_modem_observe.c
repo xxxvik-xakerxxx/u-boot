@@ -89,6 +89,7 @@ static void arm_smccc_smc(unsigned long function, unsigned long operation,
 
 #define TETRIS_MODEM_OBSERVE_HOST_TEST
 #define TETRIS_MODEM_LAYOUT_HOST_TEST
+#include "../../board/mediatek/mt6878/tetris_modem_layout.c"
 #include "../../board/mediatek/mt6878/tetris_modem_emi.c"
 #include "../../board/mediatek/mt6878/tetris_modem_observe.c"
 
