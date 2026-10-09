@@ -157,6 +157,47 @@ int tetris_modem_load_bundle(const struct tetris_modem_storage *storage,
 	return 0;
 }
 
+int tetris_modem_load_bundle_b41(const struct tetris_modem_storage *storage,
+		const struct tetris_modem_staging_ops *memory,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity, unsigned int ccb_gear,
+		struct tetris_modem_boot_plan *plan)
+{
+	struct tetris_modem_boot_plan result;
+	void *buffer = NULL;
+	size_t bytes, used;
+	int ret, release_ret;
+
+	if (!memory || !memory->acquire || !memory->release || !root_pin ||
+	    !ops || !ops->sha256 || !ops->verify ||
+	    !separate(destination, capacity, plan, sizeof(*plan)))
+		return -EINVAL;
+	ret = snapshot_size(storage, &bytes);
+	if (ret)
+		return ret;
+	ret = memory->acquire(memory->ctx, bytes, &buffer);
+	if (ret)
+		return ret;
+	if (!separate(buffer, bytes, destination, capacity) ||
+	    !separate(buffer, bytes, plan, sizeof(*plan))) {
+		ret = -EINVAL;
+	} else {
+		ret = read_snapshot(storage, buffer, bytes, &used);
+		if (!ret)
+			ret = tetris_modem_place_bundle_b41(buffer, used, root_pin, ops,
+						     destination, capacity, ccb_gear,
+						     &result);
+	}
+	release_ret = memory->release(memory->ctx, buffer, bytes);
+	if (ret)
+		return ret;
+	if (release_ret)
+		return release_ret;
+	*plan = result;
+	return 0;
+}
+
 #ifndef TETRIS_MODEM_LAYOUT_HOST_TEST
 static unsigned long long read_blocks(void *ctx, unsigned long long block,
 				     unsigned long long count, void *buffer)
@@ -301,6 +342,41 @@ int tetris_modem_load_slot(struct blk_desc *dev, char slot,
 	if (ret)
 		return ret;
 	*layout = loaded;
+	return 0;
+}
+
+int tetris_modem_load_slot_b41(struct blk_desc *dev, char slot,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity, unsigned int ccb_gear,
+		struct tetris_modem_boot_plan *plan)
+{
+	const struct tetris_modem_cache_ops cache = { .flush = flush_payload };
+	struct tetris_modem_boot_plan loaded;
+	struct staging_allocation allocation = { 0 };
+	const struct tetris_modem_staging_ops memory = {
+		.acquire = acquire_staging,
+		.release = release_staging,
+		.ctx = &allocation,
+	};
+	struct tetris_modem_storage storage;
+	int ret;
+
+	if (!separate(destination, capacity, plan, sizeof(*plan)) ||
+	    (((unsigned long)destination | capacity) & (ARCH_DMA_MINALIGN - 1)))
+		return -EINVAL;
+	ret = slot_storage(dev, slot, &storage);
+	if (ret)
+		return ret;
+	ret = tetris_modem_load_bundle_b41(&storage, &memory, root_pin, ops,
+					   destination, capacity, ccb_gear, &loaded);
+	if (ret)
+		return ret;
+	ret = tetris_modem_sync_payloads(destination, capacity, &loaded.layout,
+					ARCH_DMA_MINALIGN, &cache);
+	if (ret)
+		return ret;
+	*plan = loaded;
 	return 0;
 }
 #endif

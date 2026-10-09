@@ -195,6 +195,40 @@ int tetris_modem_place_bundle(const void *container, size_t size,
 	return 0;
 }
 
+int tetris_modem_place_bundle_b41(const void *container, size_t size,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity, unsigned int ccb_gear,
+		struct tetris_modem_boot_plan *plan)
+{
+	struct tetris_modem_prepared_bundle prepared;
+	struct tetris_modem_boot_plan out;
+	const unsigned char *source = container;
+	unsigned char *target = destination;
+	int ret;
+
+	if (!valid_span(container, size) || !valid_span(destination, capacity) ||
+	    !valid_span(plan, sizeof(*plan)) ||
+	    overlaps(container, size, destination, capacity) ||
+	    overlaps(container, size, plan, sizeof(*plan)) ||
+	    overlaps(destination, capacity, plan, sizeof(*plan)))
+		return -EINVAL;
+	ret = tetris_modem_prepare_bundle_b41(container, size, root_pin, ops,
+					    capacity, ccb_gear, &prepared);
+	if (ret)
+		return ret;
+	out.layout = prepared.bundle.layout;
+	out.smem_inputs = prepared.smem_inputs;
+	out.smem = prepared.smem;
+	/* Complete authentication and service planning precede both copies. */
+	memcpy(target, source + prepared.bundle.members[0].payload_offset,
+	       out.layout.rom_size);
+	memcpy(target + out.layout.dsp_offset,
+	       source + prepared.bundle.members[2].payload_offset, out.layout.dsp_size);
+	*plan = out;
+	return 0;
+}
+
 int tetris_modem_sync_payloads(void *destination, size_t capacity,
 		const struct tetris_modem_layout *layout, size_t alignment,
 		const struct tetris_modem_cache_ops *ops)

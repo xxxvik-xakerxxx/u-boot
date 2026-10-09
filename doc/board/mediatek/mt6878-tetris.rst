@@ -863,3 +863,26 @@ rejects both. The test now checks the SIP entry ID, name and handler before
 execution, rather than starting at an unqualified function offset.
 The private ATF image
 is hash-checked locally and is not distributed in CI.
+
+Integrated B4.1 partition load
+-----------------------------
+
+``tetris_modem_load_slot_b41()`` joins explicit-slot partition reads, scoped
+LMB staging, verification of ROM/DRDI/DSP, signed-header load/service planning,
+ROM/DSP placement, snapshot release and payload cache synchronization.
+All signatures and service metadata are checked before the first destination
+write. The caller receives a pointer-free ``tetris_modem_boot_plan`` only after
+cleanup and cache synchronization succeed. It contains the load layout,
+validated service inputs and both service tables, not offsets into freed RAM.
+
+Allocation/read/signature/layout/service failures leave destination and output
+unchanged; cleanup or cache failures may follow verified destination writes
+but must not authorize execution. Earlier errors take precedence over cleanup
+errors. Tests use synthetic signed containers with the observed stock service
+values, 512/4096-byte storage, short reads, malformed signed metadata, wrong
+root trust, invalid gear/geometry, allocation/release errors and memory aliasing.
+
+This is not a boot caller. The destination reservation, actual shared-memory
+allocation/zeroing, effective gear policy, rollback/SKU policy, full protection
+and remap transaction, ready-tag publication and secure-reset release are still
+required. No modem activation or new phone/SIM support is claimed.

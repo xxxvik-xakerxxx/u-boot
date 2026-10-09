@@ -42,6 +42,13 @@ struct tetris_modem_prepared_bundle {
 	struct tetris_modem_smem_plan smem;
 };
 
+/* Survives snapshot release: no container references or offsets. */
+struct tetris_modem_boot_plan {
+	struct tetris_modem_layout layout;
+	struct tetris_modem_smem_inputs smem_inputs;
+	struct tetris_modem_smem_plan smem;
+};
+
 /*
  * Authenticate ROM/DRDI/DSP, validate the load layout, then derive shared-memory
  * service placements from the signed ROM header. ccb_gear is effective boot
@@ -70,6 +77,13 @@ int tetris_modem_place_bundle(const void *container, size_t size,
 		const struct tetris_scp_security_ops *ops,
 		void *destination, size_t capacity,
 		struct tetris_modem_layout *layout);
+
+/* As above, but validate signed B4.1 service metadata before any RAM write. */
+int tetris_modem_place_bundle_b41(const void *container, size_t size,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity, unsigned int ccb_gear,
+		struct tetris_modem_boot_plan *plan);
 
 struct tetris_modem_cache_ops {
 	/* Clean to coherency and complete the barrier before returning success. */

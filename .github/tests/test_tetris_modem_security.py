@@ -20,6 +20,8 @@ place_native = None
 load_native = None
 sync_native = None
 prepare_native = None
+place_b41_native = None
+load_b41_native = None
 Flush = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_ulong, c.c_ulong)
 
 
@@ -70,6 +72,10 @@ class SmemPlan(c.Structure):
     _fields_ = [("nc", SmemEntry * 18), ("cache", SmemEntry * 5)]
     _fields_ += [(name, c.c_uint) for name in (
         "nc_capacity", "cache_capacity", "nc_rows", "cache_rows")]
+
+
+class BootPlan(c.Structure):
+    _fields_ = [("layout", Layout), ("inputs", SmemInputs), ("smem", SmemPlan)]
 
 
 class PreparedBundle(c.Structure):
@@ -133,6 +139,16 @@ if len(sys.argv) > 1 and sys.argv[1].endswith(".so"):
                             c.c_void_p, c.POINTER(Ops), c.c_void_p,
                             c.c_size_t, c.POINTER(Layout)]
     load_native.restype = c.c_int
+    place_b41_native = library.tetris_modem_place_bundle_b41
+    place_b41_native.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p,
+                                c.POINTER(Ops), c.c_void_p, c.c_size_t,
+                                c.c_uint, c.POINTER(BootPlan)]
+    place_b41_native.restype = c.c_int
+    load_b41_native = library.tetris_modem_load_bundle_b41
+    load_b41_native.argtypes = [c.POINTER(Storage), c.POINTER(StagingOps),
+                               c.c_void_p, c.POINTER(Ops), c.c_void_p,
+                               c.c_size_t, c.c_uint, c.POINTER(BootPlan)]
+    load_b41_native.restype = c.c_int
     sync_native = library.tetris_modem_sync_payloads
     sync_native.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Layout),
                             c.c_size_t, c.POINTER(CacheOps)]
@@ -409,7 +425,8 @@ class ModemSecurityTest(unittest.TestCase):
             self.assertEqual((source.raw, target.raw, bytes(out)), before)
 
     def storage_call(self, data, block_size=512, fail_at=None, changes=None,
-                     capacity=None, wrong_pin=False, staging=None, load=False):
+                     capacity=None, wrong_pin=False, staging=None, load=False,
+                     b41=False, gear=1):
         data += bytes((-len(data)) % block_size)
         calls = []
         violations = []
@@ -438,7 +455,7 @@ class ModemSecurityTest(unittest.TestCase):
         target = c.create_string_buffer(b"\xa5" * (0x4000 + 32))
         target_before = target.raw
         target_at_release = []
-        out = Bundle() if staging is None else Layout()
+        out = BootPlan() if b41 else (Bundle() if staging is None else Layout())
         c.memset(c.byref(out), 0xa5, c.sizeof(out))
         before = bytes(out)
         pin = bytes(32) if wrong_pin else bytes.fromhex(self.fixture.root_pin)
@@ -469,7 +486,11 @@ class ModemSecurityTest(unittest.TestCase):
                 return -16 if staging.get("release_error") else 0
 
             memory = StagingOps(acquire, release, 456)
-            if load:
+            if b41:
+                ret = load_b41_native(c.byref(storage), c.byref(memory), pin,
+                                      c.byref(ops), c.addressof(target) + 16,
+                                      0x4000, gear, c.byref(out))
+            elif load:
                 ret = load_native(c.byref(storage), c.byref(memory), pin,
                                   c.byref(ops), c.addressof(target) + 16,
                                   0x4000, c.byref(out))
@@ -504,9 +525,73 @@ class ModemSecurityTest(unittest.TestCase):
         elif staging is None:
             self.assertEqual(buffer.raw, data)
         else:
-            self.assertEqual(out.rom_size, 1024)
-            self.assertEqual(out.dsp_offset, 0x3000)
+            layout = out.layout if b41 else out
+            self.assertEqual(layout.rom_size, 1024)
+            self.assertEqual(layout.dsp_offset, 0x3000)
+            if b41:
+                self.assertEqual(out.inputs.drdi_version, 3)
+                self.assertEqual(out.inputs.ccb_gear, gear)
+                self.assertEqual(out.inputs.consys_size, 0xd80000)
+                self.assertEqual(out.inputs.nv_cache_size, 0x16a040)
+                self.assertEqual(out.smem.cache_rows, 6)
+                self.assertEqual(out.smem.cache_capacity, 0x2560000)
         return ret, calls
+
+    @unittest.skipUnless(load_b41_native, "integrated B4.1 loader executes only in CI")
+    def test_b41_load_signed_metadata_before_placement(self):
+        fields = {0x180: 0xd80000, 0x18c: 0x16a040}
+        data = b"".join(self.signed_groups(smem_fields=fields))
+        data += bytes(3 * 65536 - len(data))
+        for block_size in (512, 4096):
+            self.assertEqual(self.storage_call(data, block_size, staging={},
+                                              load=True, b41=True)[0], 0)
+            for failure in (1, 2, 3):
+                self.assertLess(self.storage_call(data, block_size, fail_at=failure,
+                                                 staging={}, load=True, b41=True)[0], 0)
+        for settings in ({"acquire_error": True}, {"release_error": True},
+                         {"null_buffer": True}):
+            self.assertLess(self.storage_call(data, staging=settings,
+                                             load=True, b41=True)[0], 0)
+        self.assertLess(self.storage_call(data, staging={}, load=True,
+                                         b41=True, wrong_pin=True)[0], 0)
+        self.assertLess(self.storage_call(data, staging={}, load=True,
+                                         b41=True, gear=16)[0], 0)
+        for invalid in ({0x184: 2}, {0x180: 0xffffffff}, {0x190: 2}):
+            bad = b"".join(self.signed_groups(smem_fields=invalid))
+            self.assertLess(self.storage_call(bad, staging={}, load=True, b41=True)[0], 0)
+        changed = bytearray(data)
+        changed[1024 + 0x180] ^= 1
+        self.assertLess(self.storage_call(bytes(changed), staging={},
+                                         load=True, b41=True)[0], 0)
+        for geometry in ({"blocks": 0}, {"start": 99999}, {"block_size": 1024}):
+            self.assertLess(self.storage_call(data, changes=geometry, staging={},
+                                             load=True, b41=True)[0], 0)
+        first = self.storage_call(data, fail_at=1, staging={}, load=True, b41=True)[0]
+        both = self.storage_call(data, fail_at=1, staging={"release_error": True},
+                                 load=True, b41=True)[0]
+        self.assertEqual(first, both)
+
+    @unittest.skipUnless(place_b41_native, "B4.1 placement executes only in CI")
+    def test_b41_placement_rejects_aliases_and_wrapping(self):
+        data = b"".join(self.signed_groups())
+        source = c.create_string_buffer(data)
+        target = c.create_string_buffer(b"\xa5" * 0x4000)
+        out = BootPlan()
+        src, dst, output = c.addressof(source), c.addressof(target), c.addressof(out)
+        maximum = c.c_size_t(-1).value
+        before = source.raw, target.raw, bytes(out)
+        cases = [(src, len(data), src, 0x4000, output),
+                 (src, len(data), dst, 0x4000, src + 16),
+                 (src, len(data), dst, 0x4000, dst + 16),
+                 (maximum - 15, len(data), dst, 0x4000, output),
+                 (src, len(data), maximum - 15, 0x4000, output),
+                 (src, len(data), dst, 0x4000, maximum - 15),
+                 (src, len(data), 0, 0x4000, output)]
+        for start, size, dest, capacity, result in cases:
+            self.assertLess(place_b41_native(start, size,
+                            bytes.fromhex(self.fixture.root_pin), c.byref(ops),
+                            dest, capacity, 1, c.cast(result, c.POINTER(BootPlan))), 0)
+            self.assertEqual((source.raw, target.raw, bytes(out)), before)
 
     @unittest.skipUnless(load_native, "native loading executes only in CI")
     def test_load_snapshot_lifetime(self):
@@ -533,8 +618,15 @@ class ModemSecurityTest(unittest.TestCase):
 
     @unittest.skipUnless(load_native, "native loading executes only in CI")
     def test_load_rejects_aliases_before_storage_read(self):
+        self.check_load_aliases()
+
+    @unittest.skipUnless(load_b41_native, "integrated B4.1 loader executes only in CI")
+    def test_b41_load_rejects_aliases_before_storage_read(self):
+        self.check_load_aliases(b41=True)
+
+    def check_load_aliases(self, b41=False):
         arena = c.create_string_buffer(b"\xa5" * 0x8000)
-        output = Layout()
+        output = BootPlan() if b41 else Layout()
         base = c.addressof(arena)
         for alias in (base, base + 0x3fff, c.addressof(output), 0,
                       c.c_size_t(-1).value - 15):
@@ -559,9 +651,12 @@ class ModemSecurityTest(unittest.TestCase):
             storage = Storage(32, 1, 4, 512, read, None)
             memory = StagingOps(acquire, release, None)
             before = arena.raw, bytes(output)
-            ret = load_native(c.byref(storage), c.byref(memory),
-                              bytes.fromhex(self.fixture.root_pin), c.byref(ops),
-                              base, 0x4000, c.byref(output))
+            args = [c.byref(storage), c.byref(memory),
+                    bytes.fromhex(self.fixture.root_pin), c.byref(ops), base, 0x4000]
+            if b41:
+                args.append(1)
+            args.append(c.byref(output))
+            ret = (load_b41_native if b41 else load_native)(*args)
             self.assertNotEqual(ret, 0)
             self.assertEqual(events, ["acquire", "release"])
             self.assertEqual((arena.raw, bytes(output)), before)

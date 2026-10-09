@@ -77,6 +77,26 @@ int tetris_modem_load_slot(struct blk_desc *dev, char slot,
 		void *destination, size_t capacity,
 		struct tetris_modem_layout *layout);
 
+/*
+ * B4.1 integrated load: plan services from authenticated metadata before
+ * placement. Snapshot cleanup must succeed before publishing the boot plan.
+ * Release failure can leave verified bytes in destination, never ready tags.
+ * Slot wrapper also synchronizes payload caches before publishing the plan.
+ * No SMEM reservation/zeroing, protection, remap, reset or automatic caller.
+ */
+int tetris_modem_load_bundle_b41(const struct tetris_modem_storage *storage,
+		const struct tetris_modem_staging_ops *memory,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity, unsigned int ccb_gear,
+		struct tetris_modem_boot_plan *plan);
+
+int tetris_modem_load_slot_b41(struct blk_desc *dev, char slot,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity, unsigned int ccb_gear,
+		struct tetris_modem_boot_plan *plan);
+
 /* Explicit, externally established slot 'a' or 'b'; no fallback or inference. */
 int tetris_modem_read_slot(struct blk_desc *dev, char slot, void *buffer,
 		size_t capacity, const unsigned char root_pin[32],
