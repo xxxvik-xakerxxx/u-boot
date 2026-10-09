@@ -7,4 +7,6 @@ Mediatek
    :maxdepth: 2
 
    mt6878-tetris
+   tetris-gpueb-transform
+   tetris-modem-bootstrap
    mt7621
