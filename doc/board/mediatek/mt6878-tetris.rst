@@ -985,3 +985,18 @@ transfer passed; display remains connected and no critical kernel-fault
 signature was found. The sensor service rejected the warm SCP handoff;
 no reload was attempted. Full shutdown was requested for the cold-start gate.
 This is one RAM-preparation pass, not modem execution, SIM or calls.
+
+The same verified loader was retained for the clean r175 installation from
+pmOS CI ``37894315052`` at ``ba605b03d8bff2b0db15cc03198948f0f16f756e``.
+Only ``super`` and ``userdata`` were written for that image installation.
+Boot ``aa136f81-1539-4455-a2f9-7eed5ffacc91`` reports Linux ``6.18.0 #176``
+and again ``service-initialization``, zero error, ``ram-loaded-not-started``.
+The separate firmware/service reservations remain present. Installed FIT
+SHA256 matches CI; root expands to 104.5 GiB. USB/SSH and a hash-verified
+32 MiB transfer passed after unlocking the Mac and reconnecting USB.
+No failed systemd unit or critical kernel crash signature was found; vendor
+warnings remain. The user confirmed normal display and touch. Sensor startup
+was disabled on the clean rootfs; its previous opt-in was restored without
+starting/reloading modules on the warm handoff. Full poweroff was issued for
+the physical cold-start test, whose results remain pending. Modem execution,
+secure protection/remap ownership and the CCCI-ready handoff remain open.
