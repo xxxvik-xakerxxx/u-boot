@@ -9,6 +9,40 @@
 #include "tetris_modem_layout.h"
 #include "tetris_modem_emi.h"
 
+int tetris_modem_read_emi_slot(unsigned int slot,
+		const struct tetris_modem_emi_ops *ops,
+		struct tetris_modem_emi_observation *observation)
+{
+	unsigned long long words[TETRIS_MODEM_EMI_READ_WORDS];
+	unsigned int step, query, group;
+	int ret;
+
+	if (!ops || !ops->smc || !observation)
+		return -EINVAL;
+	if (observation->attempted)
+		return -EALREADY;
+	if (slot < 32 || slot > 43)
+		return -ERANGE;
+	observation->attempted = 1;
+	for (step = 0; step < TETRIS_MODEM_EMI_READ_WORDS; step++) {
+		query = step == 0 ? 3 : step < 3 ? step - 1 : 4;
+		group = step < 3 ? 0 : step - 3;
+		observation->step = step;
+		words[step] = ~0ULL;
+		ret = ops->smc(ops->context, 0xc2000415U, 2, query, slot,
+			       group, &words[step]);
+		if (ret)
+			return ret < 0 ? ret : -EIO;
+		/* The enable field also distinguishes rejected stage admission.
+		 * All-ones policy words, unlike enable, are legitimate data.
+		 */
+		if (!step && words[step] > 1)
+			return -EIO;
+	}
+	memcpy(observation->words, words, sizeof(words));
+	return 0;
+}
+
 int tetris_modem_plan_emi_policy(const unsigned char preloader_sha256[32],
 		unsigned int slot,
 		unsigned long long policy[TETRIS_MODEM_EMI_POLICY_WORDS])

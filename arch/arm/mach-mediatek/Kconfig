@@ -192,6 +192,16 @@ config TETRIS_MODEM_LOAD_DIAGNOSTIC
 	  SMCs, release reset, enable CCCI, publish ready tags or write storage.
 	  This is not SIM/calls support and is disabled in ordinary builds.
 
+config TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC
+	bool "Read pinned secure modem EMI state without programming it"
+	depends on TETRIS_MODEM_LOAD_DIAGNOSTIC && TETRIS_SCP_PREPARE_DIAGNOSTIC
+	help
+	  Separate opt-in probe after successful slot-A RAM loading. Recheck the
+	  audited tee_a digest, then read slots 32..43 once through BL_EMIMPU
+	  operation 2. Policy queries update the ATF read selector, but never
+	  commit permissions, ranges, remaps or reset. Stop at the first error.
+	  Observations do not authorize modem startup or prove slot ownership.
+
 config TETRIS_SCP_SECURE_DIAGNOSTIC
 	bool "Complete pinned SCP secure handoff (diagnostic only)"
 	depends on TETRIS_SCP_TCM_DIAGNOSTIC

@@ -17,6 +17,11 @@ on:
         required: false
         type: boolean
         default: false
+      modem_emi_observe:
+        description: 'Read pinned secure EMI state; no range/permission/remap/reset writes'
+        required: false
+        type: boolean
+        default: false
       scp_prepare:
         description: 'Enable audited slot-A SCP decryption experiment (no TCM/reset)'
         required: false
@@ -121,6 +126,8 @@ jobs:
             --enable TETRIS_MODEM_RESERVE_DIAGNOSTIC
           scripts/config --file build-initramfs-only/.config \
             --enable TETRIS_MODEM_LOAD_DIAGNOSTIC
+          scripts/config --file build-initramfs-only/.config \
+            --enable TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC
           make O=build-initramfs-only olddefconfig
           make O=build-initramfs-only -j"$(nproc)" \
             CROSS_COMPILE=aarch64-linux-gnu- tools
@@ -137,6 +144,8 @@ jobs:
             board/mediatek/mt6878/tetris_modem_remap.o \
             board/mediatek/mt6878/tetris_modem_reserve.o \
             board/mediatek/mt6878/tetris_modem_load.o \
+            board/mediatek/mt6878/tetris_modem_emi.o \
+            board/mediatek/mt6878/tetris_modem_observe.o \
             board/mediatek/mt6878/tetris_scp_prepare.o \
             board/mediatek/mt6878/tetris_scp_tcm.o \
             board/mediatek/mt6878/tetris_scp_secure.o \
@@ -151,6 +160,7 @@ jobs:
           SCP_PREPARE: ${{ inputs.scp_prepare || false }}
           MODEM_RESERVE: ${{ inputs.modem_reserve || false }}
           MODEM_LOAD: ${{ inputs.modem_load || false }}
+          MODEM_EMI_OBSERVE: ${{ inputs.modem_emi_observe || false }}
           SCP_TCM: ${{ inputs.scp_tcm || false }}
           SCP_SECURE: ${{ inputs.scp_secure || false }}
         run: |
@@ -177,6 +187,13 @@ jobs:
             scripts/config --enable TETRIS_SCP_TCM_DIAGNOSTIC
             make olddefconfig
             grep -qx 'CONFIG_TETRIS_SCP_TCM_DIAGNOSTIC=y' .config
+          fi
+          if [ "$MODEM_EMI_OBSERVE" = true ]; then
+            test "$MODEM_LOAD" = true
+            test "$SCP_PREPARE" = true
+            scripts/config --enable TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC
+            make olddefconfig
+            grep -qx 'CONFIG_TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC=y' .config
           fi
           if [ "$SCP_SECURE" = true ]; then
             test "$SCP_TCM" = true
@@ -518,6 +535,11 @@ jobs:
       - name: Write artifact checksums
         run: |
           printf 'commit=%s\n' "$GITHUB_SHA" > BUILD-MANIFEST
+          if grep -qx 'CONFIG_TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC=y' .config; then
+            printf 'modem_emi_observe=slot-a-read-only\n' >> BUILD-MANIFEST
+          else
+            printf 'modem_emi_observe=disabled\n' >> BUILD-MANIFEST
+          fi
           if grep -qx 'CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC=y' .config; then
             printf 'modem_load=slot-a-ram-only\n' >> BUILD-MANIFEST
           else

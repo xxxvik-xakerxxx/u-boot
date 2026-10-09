@@ -33,6 +33,83 @@ plan_policy.restype = c.c_int
 PRELOADER_SHA = bytes.fromhex("5d2bedd00049fced983d3ae53989616c5c9f46c4eddd32a01a1ad46ff8d2c50f")
 
 
+class Observation(c.Structure):
+    _fields_ = [("attempted", c.c_uint), ("step", c.c_uint),
+                ("words", c.c_ulonglong * 11)]
+
+
+read_slot = library.tetris_modem_read_emi_slot
+read_slot.argtypes = [c.c_uint, c.POINTER(Ops), c.POINTER(Observation)]
+read_slot.restype = c.c_int
+
+
+class EmiObservationTest(unittest.TestCase):
+    def run_case(self, slot=32, enable=0, failure=None):
+        calls = []
+        values = [enable, 0x120000000, 0x122000000 | (1 << 43)] + [2**64 - 1] * 8
+
+        def smc(context, fid, operation, a, b, group, output):
+            step = len(calls)
+            calls.append((context, fid, operation, a, b, group))
+            if failure == step:
+                return -errno.ETIMEDOUT
+            output[0] = values[step]
+            return 0
+
+        cb = Callback(smc)
+        ops = Ops(cb, 123)
+        observation = Observation(words=(c.c_ulonglong * 11)(*([0x55] * 11)))
+        before = bytes(observation.words)
+        ret = read_slot(slot, c.byref(ops), c.byref(observation))
+        queries = [(3, 0), (0, 0), (1, 0)] + [(4, group) for group in range(8)]
+        expected = [(123, 0xc2000415, 2, query, slot, group) for query, group in queries]
+        self.assertEqual(calls, expected[:len(calls)])
+        if ret:
+            self.assertEqual(bytes(observation.words), before)
+        else:
+            self.assertEqual(list(observation.words), values)
+        if observation.attempted:
+            saved = bytes(observation)
+            self.assertEqual(read_slot(slot, c.byref(ops), c.byref(observation)), -errno.EALREADY)
+            self.assertEqual(bytes(observation), saved)
+        return ret, observation, calls
+
+    def test_all_slots_enabled_disabled_and_all_ones_policy(self):
+        for slot in range(32, 44):
+            for enable in (0, 1):
+                ret, observation, calls = self.run_case(slot, enable)
+                self.assertEqual(ret, 0)
+                self.assertEqual(observation.step, 10)
+                self.assertEqual(len(calls), 11)
+
+    def test_first_transport_error_is_preserved_without_partial_snapshot(self):
+        for step in range(11):
+            ret, observation, calls = self.run_case(failure=step)
+            self.assertEqual(ret, -errno.ETIMEDOUT)
+            self.assertEqual(observation.step, step)
+            self.assertEqual(len(calls), step + 1)
+
+    def test_rejected_stage_stops_before_range_or_policy_reads(self):
+        for enable in (2, 2**64 - 1, 2**64 - 4):
+            ret, observation, calls = self.run_case(enable=enable)
+            self.assertEqual(ret, -errno.EIO)
+            self.assertEqual(len(calls), 1)
+
+    def test_invalid_slots_do_not_call_transport(self):
+        for slot in (0, 31, 44, 2**32 - 1):
+            ret, observation, calls = self.run_case(slot=slot)
+            self.assertEqual(ret, -errno.ERANGE)
+            self.assertEqual(observation.attempted, 0)
+            self.assertEqual(calls, [])
+
+    def test_null_inputs_are_rejected(self):
+        observation = Observation()
+        ops = Ops()
+        self.assertEqual(read_slot(32, None, c.byref(observation)), -errno.EINVAL)
+        self.assertEqual(read_slot(32, c.byref(ops), c.byref(observation)), -errno.EINVAL)
+        self.assertEqual(read_slot(32, c.byref(ops), None), -errno.EINVAL)
+
+
 class EmiTransactionTest(unittest.TestCase):
     def test_pinned_core_policy_and_transaction(self):
         digest = (c.c_ubyte * 32).from_buffer_copy(PRELOADER_SHA)

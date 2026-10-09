@@ -1023,3 +1023,32 @@ USB/SSH and another hash-verified 32 MiB transfer passed; no failed units or
 critical kernel crash signature was found. This is one cold-start pass after
 explicit sensor opt-in, not completed lifecycle/portability. Modem execution,
 secure protection/remap ownership and the CCCI-ready handoff remain open.
+Secure Modem EMI Observation
+----------------------------
+
+``CONFIG_TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC`` is a separate, default-off
+experiment requiring successful slot-A modem RAM loading and the SCP prepare
+profile. It rechecks the declared ``tee_a`` payload against SHA256
+``05a247cb02696ce4fe1982ea00bba81236c352146c307159d3f9e380635ea32e``.
+This is a storage fingerprint, not live secure-world attestation. The probe
+uses only BL_EMIMPU ``0xc2000415`` operation 2. It reads slots 32..43 in order,
+once per U-Boot session, stopping at the first failure. Policy queries write
+the ATF read selector; no range, permission commit, remap or reset is written.
+
+The ``/chosen/tetris,modem-emi-error`` big-endian signed 32-bit value must be
+zero before consuming ``tetris,modem-emi-snapshot``. Failure metadata records
+``tetris,modem-emi-slot`` and ``tetris,modem-emi-step`` (zero-based query).
+The snapshot contains 12 rows of 11 big-endian 64-bit words: enable, raw start,
+raw end (including marker bit 43), then eight packed permission groups.
+Each group contains 32 two-bit AIDs. All-ones policy words are valid data;
+enable values other than 0 or 1 reject admission before further queries.
+Partial snapshots are never published. An all-zero placeholder with a nonzero
+error is invalid, not evidence of disabled protection.
+
+Observed permissions must never become the desired policy automatically.
+Neither a disabled slot nor a successful read proves slot ownership, unused
+one-shot guards, safe reset release, or SIM/calls support. Preserve stock
+``lk_b`` and the previously validated ``lk_a`` artifact for rollback. CI's
+``modem_emi_observe`` input is false by default and requires ``modem_load``
+and ``scp_prepare`` explicitly. Preserve the existing SCP TCM/secure inputs
+when testing on the sensor-enabled port.

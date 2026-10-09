@@ -60,6 +60,7 @@ static u64 tetris_test_get_le64(const void *ptr)
 #include "tetris_scp_handoff.h"
 #include "tetris_scp_security.h"
 #include "tetris_modem_reserve.h"
+#include "tetris_modem_emi.h"
 #endif
 
 #define TETRIS_CCCI_MAX_INFO_SIZE	0x10000U
@@ -1767,6 +1768,11 @@ void board_prep_linux(struct bootm_headers *images)
 	if (IS_ENABLED(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC)) {
 		ret = tetris_modem_load_diagnostic(fdt);
 		printf("Tetris modem RAM load diagnostic: %d (modem not started)\n", ret);
+		if (!ret && IS_ENABLED(CONFIG_TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC)) {
+			ret = tetris_modem_observe_diagnostic(fdt);
+			printf("Tetris modem EMI read diagnostic: %d (modem not started)\n",
+			       ret);
+		}
 	} else if (IS_ENABLED(CONFIG_TETRIS_MODEM_RESERVE_DIAGNOSTIC)) {
 		ret = tetris_modem_reserve_diagnostic(fdt);
 		printf("Tetris modem RAM diagnostic: %d (modem not started)\n", ret);

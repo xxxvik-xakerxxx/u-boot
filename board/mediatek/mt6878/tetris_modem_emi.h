@@ -26,6 +26,25 @@ struct tetris_modem_emi_ops {
 	void *context;
 };
 
+#define TETRIS_MODEM_EMI_READ_WORDS 11
+
+struct tetris_modem_emi_observation {
+	unsigned int attempted;
+	unsigned int step;
+	unsigned long long words[TETRIS_MODEM_EMI_READ_WORDS];
+};
+
+/* Read enable, raw endpoints and eight policy groups, never program a slot.
+ * Callback success must supply a reply. Consume the observation on the first
+ * call; stop on the first error. Words are published only on complete success.
+ * Observed policy is NOT an approved policy or evidence of slot ownership.
+ */
+int tetris_modem_read_emi_slot(unsigned int slot,
+		const struct tetris_modem_emi_ops *ops,
+		struct tetris_modem_emi_observation *observation);
+
+int tetris_modem_observe_diagnostic(void *fdt);
+
 /*
  * Candidate normal-path policy for core slots 32..38 and shared slots 41..43,
  * from preloader

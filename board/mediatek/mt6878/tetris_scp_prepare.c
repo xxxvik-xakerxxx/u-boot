@@ -214,6 +214,11 @@ static int hash_partition(struct blk_desc *dev, const char *name, u64 offset,
 	return ret;
 }
 
+int tetris_scp_check_atf_profile(struct blk_desc *dev)
+{
+	return hash_partition(dev, "tee_a", 512, PROFILE_ATF_SIZE, atf_hash);
+}
+
 #if CONFIG_IS_ENABLED(TETRIS_SCP_SECURE_DIAGNOSTIC)
 static u64 secure_smc(u32 function, u64 operation, u64 a, u64 b, u64 c)
 {
@@ -390,7 +395,7 @@ int tetris_scp_prepare_diagnostic(struct bootm_headers *images, void *fdt)
 	}
 	/* This diagnostic's slot provenance is established by the flash procedure. */
 	stage = "atf-profile";
-	ret = hash_partition(dev, "tee_a", 512, PROFILE_ATF_SIZE, atf_hash);
+	ret = tetris_scp_check_atf_profile(dev);
 	if (ret)
 		goto out;
 	stage = "scp-profile";
