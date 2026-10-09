@@ -1769,7 +1769,7 @@ void board_prep_linux(struct bootm_headers *images)
 		ret = tetris_modem_load_diagnostic(fdt);
 		printf("Tetris modem RAM load diagnostic: %d (modem not started)\n", ret);
 		if (!ret && IS_ENABLED(CONFIG_TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC)) {
-			ret = tetris_modem_observe_diagnostic(fdt);
+			ret = tetris_modem_observe_diagnostic(images);
 			printf("Tetris modem EMI read diagnostic: %d (modem not started)\n",
 			       ret);
 		}

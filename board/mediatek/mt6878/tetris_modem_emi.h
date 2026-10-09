@@ -43,7 +43,8 @@ int tetris_modem_read_emi_slot(unsigned int slot,
 		const struct tetris_modem_emi_ops *ops,
 		struct tetris_modem_emi_observation *observation);
 
-int tetris_modem_observe_diagnostic(void *fdt);
+struct bootm_headers;
+int tetris_modem_observe_diagnostic(struct bootm_headers *images);
 
 /*
  * Candidate normal-path policy for core slots 32..38 and shared slots 41..43,

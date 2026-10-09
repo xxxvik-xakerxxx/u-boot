@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0+
 #include <blk.h>
+#include <bootm.h>
 #include <dm/uclass-id.h>
+#include <env.h>
+#include <lmb.h>
+#include <mapmem.h>
 #include <linux/arm-smccc.h>
 #include <linux/errno.h>
 #include <linux/libfdt.h>
@@ -23,19 +27,57 @@ static int read_smc(void *context, unsigned int function, unsigned int operation
 	return 0;
 }
 
-int tetris_modem_observe_diagnostic(void *fdt)
+int tetris_modem_observe_diagnostic(struct bootm_headers *images)
 {
 	static bool attempted;
 	const struct tetris_modem_emi_ops ops = { .smc = read_smc };
 	fdt64_t snapshot[12][TETRIS_MODEM_EMI_READ_WORDS] = { 0 };
 	struct tetris_modem_emi_observation observation;
 	struct blk_desc *dev;
+	phys_addr_t address;
+	void *fdt;
+	u64 low, mapsize;
+	unsigned int bytes;
 	unsigned int slot = 32, word, step = 0;
 	int node, ret, report;
 
 	if (attempted)
 		return -EALREADY;
 	attempted = true;
+	if (!images || !images->ft_addr)
+		return -EINVAL;
+	fdt = images->ft_addr;
+	ret = fdt_check_header(fdt);
+	if (ret)
+		return ret;
+	bytes = fdt_totalsize(fdt);
+	if (bytes > 0x7fffffffU - 4096)
+		return -ERANGE;
+	bytes += 4096;
+	low = env_get_bootm_low();
+	mapsize = env_get_bootm_mapsize();
+	if (!mapsize || low > ~0ULL - mapsize)
+		return -ERANGE;
+	address = low + mapsize;
+	/* image_setup_linux() has already shrunk the original FDT. Never grow
+	 * that buffer in place beyond its LMB reservation. Keep the old FDT
+	 * reserved and intact; allocate a separate bounded Linux handoff copy.
+	 */
+	ret = lmb_alloc_mem(LMB_MEM_ALLOC_MAX, 4096, &address, bytes, LMB_NONE);
+	if (ret)
+		return ret;
+	if (address < low) {
+		lmb_free(address, bytes, LMB_NONE);
+		return -ERANGE;
+	}
+	ret = fdt_open_into(fdt, map_sysmem(address, bytes), bytes);
+	if (ret) {
+		lmb_free(address, bytes, LMB_NONE);
+		return ret;
+	}
+	fdt = map_sysmem(address, bytes);
+	images->ft_addr = fdt;
+	images->ft_len = bytes;
 	node = fdt_path_offset(fdt, "/chosen");
 	if (node < 0)
 		return node;
