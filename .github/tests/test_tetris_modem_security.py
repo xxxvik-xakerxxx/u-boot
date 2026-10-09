@@ -23,6 +23,7 @@ prepare_native = None
 place_b41_native = None
 load_b41_native = None
 initialize_smem_native = None
+service_banks_native = None
 Flush = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_ulong, c.c_ulong)
 
 
@@ -77,6 +78,12 @@ class SmemPlan(c.Structure):
 
 class BootPlan(c.Structure):
     _fields_ = [("layout", Layout), ("inputs", SmemInputs), ("smem", SmemPlan)]
+
+
+class ServiceBanks(c.Structure):
+    _fields_ = [(name, c.c_size_t) for name in
+                ("firmware_capacity", "nc_offset", "nc_capacity",
+                 "cache_offset", "cache_capacity")]
 
 
 class PreparedBundle(c.Structure):
@@ -159,6 +166,10 @@ if len(sys.argv) > 1 and sys.argv[1].endswith(".so"):
                                       c.c_void_p, c.c_size_t, c.c_void_p, c.c_size_t,
                                       c.c_size_t, c.POINTER(CacheOps)]
     initialize_smem_native.restype = c.c_int
+    service_banks_native = library.tetris_modem_plan_service_banks_b41
+    service_banks_native.argtypes = [c.POINTER(BootPlan), c.c_size_t,
+                                    c.POINTER(ServiceBanks)]
+    service_banks_native.restype = c.c_int
 
 
 class ModemSecurityTest(unittest.TestCase):
@@ -183,6 +194,29 @@ class ModemSecurityTest(unittest.TestCase):
         banks = [aligned(0x4000), aligned(plan.smem.nc_capacity),
                  aligned(plan.smem.cache_capacity)]
         return plan, banks
+
+    @unittest.skipUnless(service_banks_native, "physical service-bank planning executes in CI")
+    def test_service_banks_fit_one_owned_window(self):
+        plan, _ = self.smem_fixture(0xd80000)
+        plan.layout.memory_size = 0x3ffffff
+        banks = ServiceBanks()
+        self.assertEqual(service_banks_native(c.byref(plan), 512 << 20, c.byref(banks)), 0)
+        self.assertEqual(banks.firmware_capacity, 0x4000000)
+        self.assertEqual(banks.nc_offset, banks.firmware_capacity)
+        self.assertEqual(banks.nc_capacity, plan.smem.nc_capacity)
+        self.assertEqual(banks.cache_offset, banks.nc_offset + banks.nc_capacity)
+        self.assertEqual(banks.cache_capacity, plan.smem.cache_capacity)
+        end = banks.cache_offset + banks.cache_capacity
+        self.assertEqual(service_banks_native(c.byref(plan), end, c.byref(banks)), 0)
+        before = bytes(banks)
+        for capacity in (0, 0xffff, banks.firmware_capacity - 1, end - 1):
+            self.assertLess(service_banks_native(c.byref(plan), capacity, c.byref(banks)), 0)
+            self.assertEqual(bytes(banks), before)
+        self.assertLess(service_banks_native(None, 512 << 20, c.byref(banks)), 0)
+        self.assertLess(service_banks_native(c.byref(plan), 512 << 20, None), 0)
+        plan.smem.nc_capacity += 0x10000
+        self.assertLess(service_banks_native(c.byref(plan), 512 << 20, c.byref(banks)), 0)
+        self.assertEqual(bytes(banks), before)
 
     @unittest.skipUnless(initialize_smem_native, "service RAM initialization executes in CI")
     def test_smem_initialize_preserves_consys_and_firmware(self):

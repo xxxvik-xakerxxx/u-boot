@@ -163,6 +163,8 @@ static int allocate_window(void *ctx, unsigned long long *result)
 		if (size >= TETRIS_MODEM_WINDOW && base >= start &&
 		    base - start <= size - TETRIS_MODEM_WINDOW) {
 			*result = base;
+			if (ctx)
+				*(unsigned long long *)ctx = base;
 			return 0;
 		}
 	}
@@ -178,5 +180,23 @@ int tetris_modem_reserve_diagnostic(void *fdt)
 	};
 
 	return tetris_modem_reserve(fdt, &ops);
+}
+
+int tetris_modem_reserve_diagnostic_window(void *fdt, unsigned long long *base)
+{
+	unsigned long long allocated = 0;
+	const struct tetris_modem_allocator ops = {
+		.alloc = allocate_window,
+		.release = release_window,
+		.ctx = &allocated,
+	};
+	int ret;
+
+	if (!base)
+		return -EINVAL;
+	ret = tetris_modem_reserve(fdt, &ops);
+	if (!ret)
+		*base = allocated;
+	return ret;
 }
 #endif

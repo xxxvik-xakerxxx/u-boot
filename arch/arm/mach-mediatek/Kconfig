@@ -180,6 +180,18 @@ config TETRIS_MODEM_RESERVE_DIAGNOSTIC
 	  through LMB after boot image placement and publish a no-map carveout.
 	  Does not load firmware, issue SMCs, enable CCCI or start the modem.
 
+config TETRIS_MODEM_LOAD_DIAGNOSTIC
+	bool "Load authenticated slot-A modem firmware into owned RAM"
+	depends on TETRIS_MODEM_RESERVE_DIAGNOSTIC && LEGACY_HASHING_AND_CRYPTO
+	select TETRIS_SCP_SECURITY
+	select TETRIS_SCP_HANDOFF_INVENTORY
+	help
+	  Opt-in RAM-only bring-up profile. The operator must establish LK slot A.
+	  Check boot-control metadata, reserve a fresh 512 MiB window, verify
+	  modem_a and place its ROM/DSP with B4.1 service RAM. Never issue modem
+	  SMCs, release reset, enable CCCI, publish ready tags or write storage.
+	  This is not SIM/calls support and is disabled in ordinary builds.
+
 config TETRIS_SCP_SECURE_DIAGNOSTIC
 	bool "Complete pinned SCP secure handoff (diagnostic only)"
 	depends on TETRIS_SCP_TCM_DIAGNOSTIC

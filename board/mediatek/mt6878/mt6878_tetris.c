@@ -1745,7 +1745,10 @@ void board_prep_linux(struct bootm_headers *images)
 	ret = tetris_prepare_connsys_emi(fdt);
 	if (ret)
 		panic("Tetris: refusing Linux boot without conninfra EMI mapping\n");
-	if (IS_ENABLED(CONFIG_TETRIS_MODEM_RESERVE_DIAGNOSTIC)) {
+	if (IS_ENABLED(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC)) {
+		ret = tetris_modem_load_diagnostic(fdt);
+		printf("Tetris modem RAM load diagnostic: %d (modem not started)\n", ret);
+	} else if (IS_ENABLED(CONFIG_TETRIS_MODEM_RESERVE_DIAGNOSTIC)) {
 		ret = tetris_modem_reserve_diagnostic(fdt);
 		printf("Tetris modem RAM diagnostic: %d (modem not started)\n", ret);
 	}

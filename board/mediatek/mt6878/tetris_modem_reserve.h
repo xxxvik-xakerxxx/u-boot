@@ -16,4 +16,6 @@ struct tetris_modem_allocator {
 /* Transactional DT publication; never loads firmware or changes hardware. */
 int tetris_modem_reserve(void *fdt, const struct tetris_modem_allocator *ops);
 int tetris_modem_reserve_diagnostic(void *fdt);
+int tetris_modem_reserve_diagnostic_window(void *fdt, unsigned long long *base);
+int tetris_modem_load_diagnostic(void *fdt);
 #endif

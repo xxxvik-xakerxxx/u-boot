@@ -316,3 +316,33 @@ int tetris_modem_initialize_smem_b41(const struct tetris_modem_boot_plan *plan,
 				 cache_base + cache_capacity);
 	return ret > 0 ? -EIO : ret;
 }
+
+int tetris_modem_plan_service_banks_b41(const struct tetris_modem_boot_plan *plan,
+		size_t capacity, struct tetris_modem_service_banks *banks)
+{
+	struct tetris_modem_smem_plan expected;
+	struct tetris_modem_service_banks out;
+	size_t mask = 0xffff;
+	int ret;
+
+	if (!plan || !banks || !capacity || !plan->layout.memory_size)
+		return -EINVAL;
+	ret = tetris_modem_plan_smem_b41(&plan->smem_inputs, &expected);
+	if (ret)
+		return ret;
+	if (memcmp(&expected, &plan->smem, sizeof(expected)))
+		return -EBADMSG;
+	if (capacity <= mask || plan->layout.memory_size > capacity - mask)
+		return -ENOSPC;
+	out.firmware_capacity = ((size_t)plan->layout.memory_size + mask) & ~mask;
+	out.nc_offset = out.firmware_capacity;
+	out.nc_capacity = expected.nc_capacity;
+	if (out.nc_capacity > capacity - out.nc_offset)
+		return -ENOSPC;
+	out.cache_offset = out.nc_offset + out.nc_capacity;
+	out.cache_capacity = expected.cache_capacity;
+	if (out.cache_capacity > capacity - out.cache_offset)
+		return -ENOSPC;
+	*banks = out;
+	return 0;
+}

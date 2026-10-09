@@ -49,6 +49,18 @@ struct tetris_modem_boot_plan {
 	struct tetris_modem_smem_plan smem;
 };
 
+struct tetris_modem_service_banks {
+	size_t firmware_capacity;
+	size_t nc_offset;
+	size_t nc_capacity;
+	size_t cache_offset;
+	size_t cache_capacity;
+};
+
+/* Place complete banks in one exclusively owned window; no RAM access. */
+int tetris_modem_plan_service_banks_b41(const struct tetris_modem_boot_plan *plan,
+		size_t capacity, struct tetris_modem_service_banks *banks);
+
 /*
  * Authenticate ROM/DRDI/DSP, validate the load layout, then derive shared-memory
  * service placements from the signed ROM header. ccb_gear is effective boot

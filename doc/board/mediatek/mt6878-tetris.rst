@@ -918,4 +918,32 @@ failures. CI ``37895114890`` passed native tests, both ARM64 configurations,
 boot-contract checks and LK packaging at ``a92dff3a69``. No phone change or
 SIM/calls is claimed by these tests; the automatic startup caller remains
 unimplemented.
+
+Opt-in RAM-load boot profile
+---------------------------
+
+``TETRIS_MODEM_LOAD_DIAGNOSTIC`` connects partition authentication, placement
+and fresh service-memory preparation to ``board_prep_linux``. Ordinary builds
+leave it disabled. CI input ``modem_load=true`` requires ``modem_reserve=true``;
+the operator must establish execution from ``lk_a`` before installation. The
+profile additionally verifies slot-A boot-control metadata, uses the board's
+UFS descriptor and reads only ``misc`` and ``modem_a``. It never writes storage.
+
+One fresh 512 MiB LMB window is reserved transactionally in the Linux DT.
+Authenticated metadata determines firmware, NC and cache-bank placement;
+their complete 64 KiB-aligned extents must fit in that window. Signature and
+metadata validation precede payload writes. ROM/DSP and cleared service RAM
+are synchronized before reporting ``ram-loaded-not-started``. Any acquired
+window remains reserved on failure, including a cache or reporting failure.
+There is one attempt per boot, without retrying partially prepared memory.
+
+``/chosen/nothing,modem-load-stage``, ``nothing,modem-load-error`` and
+``nothing,modem-load-status`` report the first failure or RAM-only completion;
+no addresses, firmware content or calibration are published. No modem SMC,
+reset release, DMA, CCCI-ready tag or Linux modem consumer is enabled. The
+fresh CONSYS prefix is not a valid connectivity handoff: its real shared-memory
+ownership still has to be established before modem execution. Likewise the
+profile does not establish SKU/rollback policy or authorization to start the
+loaded firmware. Native/ARM64 CI and live boot testing of this profile remain
+pending.
 This artifact was not installed; the proven SCP-enabled loader is retained.
