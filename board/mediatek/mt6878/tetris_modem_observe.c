@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0+
+#ifndef TETRIS_MODEM_OBSERVE_HOST_TEST
 #include <blk.h>
 #include <bootm.h>
 #include <dm/uclass-id.h>
@@ -9,6 +10,7 @@
 #include <linux/errno.h>
 #include <linux/libfdt.h>
 #include <linux/string.h>
+#endif
 #include "tetris_modem_emi.h"
 #include "tetris_scp_security.h"
 
