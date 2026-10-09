@@ -37,6 +37,11 @@ on:
         required: false
         type: boolean
         default: false
+      gpueb_transform:
+        description: 'Authenticate/transform RV33 and erase staging; no GPU boot or power writes'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-tetris:
@@ -97,6 +102,10 @@ jobs:
 
       - name: Test native SCP and modem certificate verifiers
         run: PYTHON=.venv/bin/python sh .github/tests/run_tetris_scp_security_c.sh
+      - name: Test authenticated GPUEB transform without hardware
+        run: |
+          python3 .github/tests/test_tetris_gpueb_static.py
+          PYTHON=.venv/bin/python sh .github/tests/run_tetris_gpueb.sh
 
       - name: Test strict RSA-PSS salt length with U-Boot crypto
         run: |
@@ -124,6 +133,8 @@ jobs:
             --enable TETRIS_SCP_TCM_DIAGNOSTIC \
             --enable TETRIS_SCP_SECURE_DIAGNOSTIC
           scripts/config --file build-initramfs-only/.config \
+            --enable TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC
+          scripts/config --file build-initramfs-only/.config \
             --enable TETRIS_MODEM_RESERVE_DIAGNOSTIC
           scripts/config --file build-initramfs-only/.config \
             --enable TETRIS_MODEM_LOAD_DIAGNOSTIC
@@ -139,6 +150,8 @@ jobs:
             board/mediatek/mt6878/tetris_scp_handoff.o \
             board/mediatek/mt6878/tetris_scp_crypto.o \
             board/mediatek/mt6878/tetris_scp_security.o \
+            board/mediatek/mt6878/tetris_gpueb_layout.o \
+            board/mediatek/mt6878/tetris_gpueb_prepare.o \
             board/mediatek/mt6878/tetris_modem_layout.o \
             board/mediatek/mt6878/tetris_modem_bundle.o \
             board/mediatek/mt6878/tetris_modem_storage.o \
@@ -164,6 +177,7 @@ jobs:
           MODEM_EMI_OBSERVE: ${{ inputs.modem_emi_observe || false }}
           SCP_TCM: ${{ inputs.scp_tcm || false }}
           SCP_SECURE: ${{ inputs.scp_secure || false }}
+          GPUEB_TRANSFORM: ${{ inputs.gpueb_transform || false }}
         run: |
           . .venv/bin/activate
           make mt6878_tetris_defconfig
@@ -201,6 +215,12 @@ jobs:
             scripts/config --enable TETRIS_SCP_SECURE_DIAGNOSTIC
             make olddefconfig
             grep -qx 'CONFIG_TETRIS_SCP_SECURE_DIAGNOSTIC=y' .config
+          fi
+          if [ "$GPUEB_TRANSFORM" = true ]; then
+            test "$SCP_SECURE" = true
+            scripts/config --enable TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC
+            make olddefconfig
+            grep -qx 'CONFIG_TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC=y' .config
           fi
 
       - name: Test bounded LK CCCI handoff observation
@@ -536,6 +556,11 @@ jobs:
       - name: Write artifact checksums
         run: |
           printf 'commit=%s\n' "$GITHUB_SHA" > BUILD-MANIFEST
+          if grep -qx 'CONFIG_TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC=y' .config; then
+            printf 'gpueb_transform=slot-a-verified-erased-no-boot\n' >> BUILD-MANIFEST
+          else
+            printf 'gpueb_transform=disabled\n' >> BUILD-MANIFEST
+          fi
           if grep -qx 'CONFIG_TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC=y' .config; then
             printf 'modem_emi_observe=slot-a-read-only\n' >> BUILD-MANIFEST
           else

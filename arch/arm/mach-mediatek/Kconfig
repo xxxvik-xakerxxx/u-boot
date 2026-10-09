@@ -246,6 +246,15 @@ config TETRIS_SCP_SECURITY
 	  Verify MediaTek SCP certificates and encrypted payloads against a
 	  caller-provisioned root pin. No automatic loader is enabled.
 
+config TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC
+	bool "Authenticate and transform GPUEB without starting it"
+	depends on TETRIS_SCP_PREPARE_DIAGNOSTIC && TETRIS_SCP_SECURITY
+	help
+	  One slot-A RV33 transform in the existing pinned ATF/SCP boot window.
+	  Verify signed input and output, report bounded format metadata, then
+	  erase temporary RAM. No GPUEB upload, power, reset or execution.
+	  Keep disabled for normal builds. This is not GPU acceleration.
+
 config TETRIS_SCP_CRYPTO
 	bool "Build experimental Tetris SCP secure decryption transport"
 	depends on TARGET_MT6878

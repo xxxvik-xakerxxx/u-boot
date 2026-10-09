@@ -288,6 +288,64 @@ failed:
 	return -EACCES;
 }
 
+int tetris_gpueb_authenticate(const void *cert1, size_t size1,
+		const void *cert2, size_t size2, const void *header, size_t header_size,
+		const void *image, size_t image_size, const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		struct tetris_scp_security_metadata *metadata)
+{
+	static const unsigned char name[32] = "tinysys-gpueb-RV33_A";
+	static const unsigned char profile[] = { 2, 3, 1, 0, 0 };
+	struct tetris_scp_security_metadata verified = { 0 };
+	struct certificate leaf;
+	const struct field *field;
+	unsigned char digest[32], expected[32], nonzero_wrapped = 0, nonzero_plain = 0;
+	volatile unsigned char *erase = (volatile unsigned char *)&verified;
+	size_t i;
+	int ret;
+
+	if (!metadata)
+		return -EINVAL;
+	memset(metadata, 0, sizeof(*metadata));
+	if (!header || header_size != 512 ||
+	    memcmp((const unsigned char *)header + 8, name, sizeof(name)) ||
+	    !image || !image_size || image_size > 0x100000 || image_size % 16)
+		return -EINVAL;
+	for (i = 0; i < 4; i++)
+		if (((const unsigned char *)header)[4 + i] != ((image_size >> (8 * i)) & 255))
+			return -EINVAL;
+	ret = verify_chain(cert1, size1, cert2, size2, root_pin, ops, &leaf);
+	if (ret)
+		return ret;
+	field = metadata_field(&leaf, 2, 9);
+	if (!field || !bytes(field, profile, sizeof(profile)))
+		return -EPROTONOSUPPORT;
+	ret = -EACCES;
+	if (get_digest(&leaf, 2, 4, expected) ||
+	    get_digest(&leaf, 2, 1, verified.ciphertext) ||
+	    get_digest(&leaf, 4, 2, verified.plaintext) ||
+	    get_digest(&leaf, 2, 8, verified.wrapped))
+		goto out;
+	ops->sha256(header, header_size, digest);
+	if (memcmp(digest, expected, sizeof(digest)))
+		goto out;
+	ops->sha256(image, image_size, digest);
+	if (memcmp(digest, verified.ciphertext, sizeof(digest)))
+		goto out;
+	for (i = 0; i < 32; i++) {
+		nonzero_wrapped |= verified.wrapped[i];
+		nonzero_plain |= verified.plaintext[i];
+	}
+	if (!nonzero_wrapped || !nonzero_plain)
+		goto out;
+	*metadata = verified;
+	ret = 0;
+out:
+	for (i = 0; i < sizeof(verified); i++)
+		erase[i] = 0;
+	return ret;
+}
+
 int tetris_modem_verify_signature(const void *cert1, size_t size1,
 				  const void *cert2, size_t size2,
 				  const void *header, size_t header_size,

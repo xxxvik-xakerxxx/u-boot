@@ -22,6 +22,7 @@
 #include "tetris_scp_security.h"
 #include "tetris_scp_tcm.h"
 #include "tetris_scp_secure.h"
+#include "tetris_gpueb_prepare.h"
 
 #define PROFILE_CONTAINER_SIZE 0xa43070U
 #define PROFILE_ATF_SIZE 900240U
@@ -340,6 +341,96 @@ static int prepare_secure(void *fdt, u8 *core, u64 base, u64 capacity,
 }
 #endif
 
+#if CONFIG_IS_ENABLED(TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC)
+static void erase_gpueb_buffer(void *buffer, size_t size)
+{
+	volatile u8 *p = buffer;
+
+	while (size--)
+		*p++ = 0;
+}
+
+static int gpueb_transform_diagnostic(struct blk_desc *dev, void *fdt,
+				      struct tetris_scp_crypto *crypto)
+{
+	struct tetris_gpueb_prepare attempt = { 0 };
+	struct tetris_gpueb_report report = { 0 };
+	struct disk_partition part;
+	phys_addr_t address = 0xa0000000ULL;
+	u8 *container = NULL, *staging = NULL;
+	size_t bytes = 0;
+	int node, ret, released, published;
+
+	/* Slot A and the exact ATF profile were checked by the SCP caller. */
+	ret = part_get_info_by_name(dev, "gpueb_a", &part);
+	if (ret < 0)
+		goto out;
+	if (!part.blksz || part.blksz != dev->blksz || !part.size ||
+	    part.size > TETRIS_GPUEB_MAX_CONTAINER / part.blksz ||
+	    part.start > dev->lba || part.size > dev->lba - part.start) {
+		ret = -ERANGE;
+		goto out;
+	}
+	bytes = part.size * part.blksz;
+	container = memalign(ARCH_DMA_MINALIGN, ALIGN(bytes, ARCH_DMA_MINALIGN));
+	if (!container) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	if (blk_dread(dev, part.start, part.size, container) != part.size) {
+		ret = -EIO;
+		goto out;
+	}
+	ret = lmb_alloc_mem(LMB_MEM_ALLOC_MAX, 4096, &address,
+			    TETRIS_GPUEB_MAX_IMAGE, LMB_NOMAP | LMB_NOOVERWRITE);
+	if (ret)
+		goto out;
+	staging = map_sysmem(address, TETRIS_GPUEB_MAX_IMAGE);
+	ret = tetris_gpueb_transform_only(&attempt, crypto,
+		&tetris_scp_security_hw_ops, container, bytes, staging,
+		TETRIS_GPUEB_MAX_IMAGE, root_pin, &report);
+	/* The transform is synchronous and no device ever owns this staging RAM. */
+	erase_gpueb_buffer(staging, TETRIS_GPUEB_MAX_IMAGE);
+	flush_dcache_range(address, address + TETRIS_GPUEB_MAX_IMAGE);
+	unmap_sysmem(staging);
+	released = lmb_free(address, TETRIS_GPUEB_MAX_IMAGE,
+			    LMB_NOMAP | LMB_NOOVERWRITE);
+	if (released) {
+		printf("Tetris: GPUEB erased staging release reported an error: %d\n", released);
+		if (!ret)
+			ret = released;
+	}
+out:
+	if (container) {
+		erase_gpueb_buffer(container, bytes);
+		free(container);
+	}
+	node = fdt_path_offset(fdt, "/chosen");
+	published = node < 0 ? node : fdt_setprop_u32(fdt, node,
+					"nothing,gpueb-transform-error", ret);
+	if (!published)
+		published = fdt_setprop_string(fdt, node, "nothing,gpueb-transform-status",
+					       ret ? "failed" : "verified-erased");
+	if (!ret && !published)
+		published = fdt_setprop_u32(fdt, node, "nothing,gpueb-transform-bytes",
+					    report.plain.bytes);
+	if (!ret && !published)
+		published = fdt_setprop_u32(fdt, node, "nothing,gpueb-transform-format",
+					    report.plain.format);
+	if (!ret && !published)
+		published = fdt_setprop_u32(fdt, node, "nothing,gpueb-stock-copy-covered",
+					    report.plain.covers_stock_copy);
+	if (!ret && !published)
+		published = fdt_setprop(fdt, node, "nothing,gpueb-plaintext-sha256",
+					report.plaintext_sha256, sizeof(report.plaintext_sha256));
+	if (published)
+		printf("Tetris: GPUEB diagnostic publication failed: %d\n", published);
+	printf("Tetris: GPUEB transform error=%d bytes=%zu format=%u (erased, not started)\n",
+	       ret, report.plain.bytes, report.plain.format);
+	return ret;
+}
+#endif
+
 int tetris_scp_prepare_diagnostic(struct bootm_headers *images, void *fdt)
 {
 	static bool attempted;
@@ -483,6 +574,11 @@ int tetris_scp_prepare_diagnostic(struct bootm_headers *images, void *fdt)
 			goto out;
 	}
 	stage = "plaintext-verified";
+#if CONFIG_IS_ENABLED(TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC)
+	/* Optional failure must not discard the already authenticated SCP images. */
+	gpueb_transform_diagnostic(dev, fdt, &crypto);
+	chosen = fdt_path_offset(fdt, "/chosen");
+#endif
 	if (chosen >= 0)
 		ret = fdt_setprop_u32(fdt, chosen, "nothing,scp-plaintext-region-size",
 				get_unaligned_le32(core + 4 + 28));
