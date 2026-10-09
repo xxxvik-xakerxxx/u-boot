@@ -30,14 +30,29 @@ staging must remain disjoint from the service page and existing SCP images.
 Failure is reported separately and must not discard authenticated SCP images.
 
 ``/chosen`` reports ``nothing,gpueb-transform-status``, its error, and on
-success only the original byte count, bounded format category, whether that
+success the original byte count, bounded format category, whether that
 count covers the stock fixed copy span, and verified plaintext SHA256.
-Format recognition does not validate an ELF, compressed stream or upload.
+After plaintext digest verification, a bounded inspector additionally reports
+static little-endian RISC-V ELF32/64 load segments or MTK PT record framing.
+Unknown formats retain zero segment metadata. Malformed recognized formats fail
+without publishing a report, and staging is still erased. Nothing decompresses
+or executes those records.
+
+``nothing,gpueb-segment-format`` is 0 (unknown), 1 (ELF32), 2 (ELF64), or
+3 (MTK PT). ``nothing,gpueb-segment-count``, ``nothing,gpueb-memory-span``,
+``nothing,gpueb-entry-offset`` and ``nothing,gpueb-trailer-bytes`` are bounded
+integers. ``nothing,gpueb-segments`` contains seven big-endian u32 cells per
+record: file offset, file bytes, relative memory offset, memory bytes, ELF
+flags, PT ID and PT alignment. Unused category fields are zero. PT IDs do not
+establish executable roles or a memory map; absolute addresses, raw bytes and
+C structure padding are never exported. ELF validation is an inspection
+profile, not GPUEB upload authorization. No persistent report ABI is promised.
 Current authenticated ciphertext is 156064 bytes while the declared LK copies
 258744 bytes. Until that mismatch is resolved, padding or copying the larger
 span is forbidden.
 
-CI runs signature/framing/alias/failure fixtures and AArch64 object compilation.
+CI runs signature/framing/alias/failure fixtures, sanitizer segment tests and
+AArch64 object compilation, rebuilding every caller with the new report layout.
 Those are not hardware evidence. The next gate is one controlled transform-only
 boot with exact artifact hashes, USB/SSH and sensor regressions checked before
 and after. The diagnostic does not authorize a GPUEB boot or GPU power test.

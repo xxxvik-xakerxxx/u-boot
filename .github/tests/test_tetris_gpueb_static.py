@@ -42,6 +42,10 @@ class Static(unittest.TestCase):
         for forbidden in ("writel(", "readl(", "arm_smccc_smc(", "printf(", "gunzip("):
             self.assertNotIn(forbidden, source)
         self.assertLess(source.index("tetris_gpueb_authenticate("), source.index("memcpy(staging"))
+        self.assertLess(source.index("tetris_scp_crypto_decrypt("),
+                        source.index("tetris_gpueb_inspect_segments("))
+        self.assertLess(source.index("tetris_gpueb_inspect_segments("),
+                        source.index("*report = result;"))
         self.assertIn("wipe(staging, capacity);", source)
         self.assertIn("TETRIS_SCP_CRYPTO_READY", source)
 

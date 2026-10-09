@@ -152,6 +152,7 @@ jobs:
             board/mediatek/mt6878/tetris_scp_security.o \
             board/mediatek/mt6878/tetris_gpueb_layout.o \
             board/mediatek/mt6878/tetris_gpueb_prepare.o \
+            board/mediatek/mt6878/tetris_gpueb_segments.o \
             board/mediatek/mt6878/tetris_modem_layout.o \
             board/mediatek/mt6878/tetris_modem_bundle.o \
             board/mediatek/mt6878/tetris_modem_storage.o \

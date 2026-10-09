@@ -2,6 +2,7 @@
 #ifndef __TETRIS_GPUEB_PREPARE_H
 #define __TETRIS_GPUEB_PREPARE_H
 #include "tetris_gpueb_layout.h"
+#include "tetris_gpueb_segments.h"
 #include "tetris_scp_crypto.h"
 #include "tetris_scp_security.h"
 
@@ -17,6 +18,7 @@ struct tetris_gpueb_prepare {
 
 struct tetris_gpueb_report {
 	struct tetris_gpueb_plain_info plain;
+	struct tetris_gpueb_segment_info segments;
 	unsigned char plaintext_sha256[32];
 };
 

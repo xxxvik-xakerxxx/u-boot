@@ -16,6 +16,7 @@ obj-$(CONFIG_TETRIS_SCP_SECURITY) += tetris_modem_storage.o
 obj-$(CONFIG_TETRIS_SCP_SECURITY) += tetris_modem_remap.o
 obj-$(CONFIG_TETRIS_SCP_SECURITY) += tetris_modem_emi.o
 obj-$(CONFIG_TETRIS_SCP_SECURITY) += tetris_gpueb_layout.o tetris_gpueb_prepare.o
+obj-$(CONFIG_TETRIS_SCP_SECURITY) += tetris_gpueb_segments.o
 $(obj)/tetris_scp_security.o: $(obj)/tetris_scp_fields.asn1.h
 $(obj)/tetris_scp_fields.asn1.o: $(obj)/tetris_scp_fields.asn1.c $(obj)/tetris_scp_fields.asn1.h
 ccflags-$(CONFIG_TETRIS_SCP_SECURITY) += -I$(obj)

@@ -107,6 +107,8 @@ int tetris_gpueb_transform_only(struct tetris_gpueb_prepare *attempt,
 	if (ret)
 		goto out;
 	ret = tetris_gpueb_describe_plain(staging, size, &result.plain);
+	if (!ret)
+		ret = tetris_gpueb_inspect_segments(staging, size, &result.segments);
 	if (!ret) {
 		memcpy(result.plaintext_sha256, metadata.plaintext, 32);
 		*report = result;

@@ -355,10 +355,12 @@ static int gpueb_transform_diagnostic(struct blk_desc *dev, void *fdt,
 {
 	struct tetris_gpueb_prepare attempt = { 0 };
 	struct tetris_gpueb_report report = { 0 };
+	fdt32_t records[TETRIS_GPUEB_MAX_SEGMENTS * 7];
 	struct disk_partition part;
 	phys_addr_t address = 0xa0000000ULL;
 	u8 *container = NULL, *staging = NULL;
 	size_t bytes = 0;
+	unsigned int i;
 	int node, ret, released, published;
 
 	/* Slot A and the exact ATF profile were checked by the SCP caller. */
@@ -423,6 +425,36 @@ out:
 	if (!ret && !published)
 		published = fdt_setprop(fdt, node, "nothing,gpueb-plaintext-sha256",
 					report.plaintext_sha256, sizeof(report.plaintext_sha256));
+	if (!ret && !published)
+		published = fdt_setprop_u32(fdt, node, "nothing,gpueb-segment-format",
+					    report.segments.format);
+	if (!ret && !published)
+		published = fdt_setprop_u32(fdt, node, "nothing,gpueb-segment-count",
+					    report.segments.count);
+	if (!ret && !published)
+		published = fdt_setprop_u32(fdt, node, "nothing,gpueb-memory-span",
+					    report.segments.memory_span);
+	if (!ret && !published)
+		published = fdt_setprop_u32(fdt, node, "nothing,gpueb-entry-offset",
+					    report.segments.entry_offset);
+	if (!ret && !published)
+		published = fdt_setprop_u32(fdt, node, "nothing,gpueb-trailer-bytes",
+					    report.segments.trailer_bytes);
+	/* Relative metadata only, serialized as FDT cells, never C padding or code. */
+	for (i = 0; !ret && !published && i < report.segments.count; i++) {
+		const struct tetris_gpueb_segment *s = &report.segments.segments[i];
+
+		records[i * 7] = cpu_to_fdt32(s->file_offset);
+		records[i * 7 + 1] = cpu_to_fdt32(s->file_bytes);
+		records[i * 7 + 2] = cpu_to_fdt32(s->memory_offset);
+		records[i * 7 + 3] = cpu_to_fdt32(s->memory_bytes);
+		records[i * 7 + 4] = cpu_to_fdt32(s->flags);
+		records[i * 7 + 5] = cpu_to_fdt32(s->pt_id);
+		records[i * 7 + 6] = cpu_to_fdt32(s->pt_alignment);
+	}
+	if (!ret && !published && report.segments.count)
+		published = fdt_setprop(fdt, node, "nothing,gpueb-segments", records,
+				       report.segments.count * 7 * sizeof(*records));
 	if (published)
 		printf("Tetris: GPUEB diagnostic publication failed: %d\n", published);
 	printf("Tetris: GPUEB transform error=%d bytes=%zu format=%u (erased, not started)\n",

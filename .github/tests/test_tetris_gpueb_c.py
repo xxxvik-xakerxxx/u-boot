@@ -34,8 +34,20 @@ class Plain(c.Structure):
                 ("covers_stock_copy", c.c_uint), ("gzip_isize_hint", c.c_uint)]
 
 
+class Segment(c.Structure):
+    _fields_ = [(name, c.c_uint) for name in (
+        "file_offset", "file_bytes", "memory_offset", "memory_bytes", "flags",
+        "pt_id", "pt_alignment")]
+
+
+class Segments(c.Structure):
+    _fields_ = [(name, c.c_uint) for name in (
+        "format", "count", "memory_span", "entry_offset", "trailer_bytes")]
+    _fields_ += [("segments", Segment * 16)]
+
+
 class Report(c.Structure):
-    _fields_ = [("plain", Plain), ("digest", c.c_ubyte * 32)]
+    _fields_ = [("plain", Plain), ("segments", Segments), ("digest", c.c_ubyte * 32)]
 
 
 layout = lib.tetris_gpueb_parse_layout
@@ -58,9 +70,10 @@ class GPUEB(unittest.TestCase):
         base.fixtures.SecurityTest.setUpClass()
         cls.fixture = base.fixtures.SecurityTest()
 
-    def image(self, profile=0x10000, bad_header=False, zero_wrapped=False):
+    def image(self, profile=0x10000, bad_header=False, zero_wrapped=False, plaintext=None):
         self.ciphertext = b"C" * 128
-        self.plaintext = b"P" * 128
+        self.plaintext = b"P" * 128 if plaintext is None else plaintext
+        self.assertEqual(len(self.plaintext), 128)
         root_spki = base.fixtures.scp.der(self.fixture.key.public_key().public_bytes(
             base.fixtures.serialization.Encoding.DER,
             base.fixtures.serialization.PublicFormat.SubjectPublicKeyInfo))
@@ -148,11 +161,36 @@ class GPUEB(unittest.TestCase):
         self.assertEqual(self.crypto.state, 1)
         self.assertEqual(self.report.plain.bytes, 128)
         self.assertFalse(self.report.plain.covers_stock_copy)
+        self.assertEqual(self.report.segments.format, 0)
+        self.assertEqual(self.report.segments.count, 0)
         self.assertEqual(bytes(self.report.digest), hashlib.sha256(self.plaintext).digest())
         self.assertEqual(c.string_at(self.staging, 256), bytes(256))
         self.assertEqual(c.string_at(self.page + 0x40, 32), bytes(32))
         self.assertEqual(c.string_at(self.page + 0x100, 32), bytes(32))
         self.assertEqual(self.container.raw, self.raw)
+        self.assertNotEqual(self.call(), 0)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_authenticated_pt_metadata_and_malformed_known_format(self):
+        plaintext = bytearray(128)
+        struct.pack_into("<6I", plaintext, 0, 0x58901690, 24, 104, 4, 99, 0)
+        self.setup(self.image(plaintext=bytes(plaintext)))
+        self.assertEqual(self.call(), 0)
+        self.assertEqual(self.report.segments.format, 3)
+        self.assertEqual(self.report.segments.count, 1)
+        self.assertEqual(self.report.segments.memory_span, 0)
+        segment = self.report.segments.segments[0]
+        self.assertEqual((segment.file_offset, segment.file_bytes, segment.pt_id),
+                         (24, 104, 99))
+        self.assertEqual(c.string_at(self.staging, 256), bytes(256))
+        struct.pack_into("<I", plaintext, 12, 3)
+        self.setup(self.image(plaintext=bytes(plaintext)))
+        before = bytes(self.report)
+        self.assertNotEqual(self.call(), 0)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(bytes(self.report), before)
+        self.assertEqual(c.string_at(self.staging, 256), bytes(256))
+        self.assertEqual(self.crypto.state, 1)
         self.assertNotEqual(self.call(), 0)
         self.assertEqual(len(self.calls), 1)
 

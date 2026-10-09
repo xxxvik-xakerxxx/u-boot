@@ -14,6 +14,12 @@ for header in asn1.h asn1_decoder.h asn1_ber_bytecode.h; do
 done
 board="$root/board/mediatek/mt6878"
 cc=${HOSTCC:-cc}
+"$cc" -std=c11 -Wall -Wextra -Werror -g -O1 \
+    -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -DTETRIS_GPUEB_HOST_TEST -I"$board" \
+    "$board/tetris_gpueb_segments.c" "$root/.github/tests/tetris_gpueb_segments_test.c" \
+    -o "$work/segments"
+"$work/segments"
 "$cc" -I"$work/include" "$root/tools/asn1_compiler.c" -o "$work/compiler"
 "$work/compiler" "$board/tetris_scp_fields.asn1" \
     "$work/tetris_scp_fields.asn1.c" "$work/tetris_scp_fields.asn1.h"
@@ -25,5 +31,6 @@ cc=${HOSTCC:-cc}
     "$root/lib/asn1_decoder.c" "$work/tetris_scp_fields.asn1.c" \
     "$board/tetris_scp_security.c" "$board/tetris_scp_crypto.c" \
     "$board/tetris_gpueb_layout.c" "$board/tetris_gpueb_prepare.c" \
+    "$board/tetris_gpueb_segments.c" \
     -o "$work/gpueb.so"
 "${PYTHON:-python3}" "$root/.github/tests/test_tetris_gpueb_c.py" "$work/gpueb.so"
