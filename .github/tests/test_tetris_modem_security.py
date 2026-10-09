@@ -22,6 +22,7 @@ sync_native = None
 prepare_native = None
 place_b41_native = None
 load_b41_native = None
+initialize_smem_native = None
 Flush = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_ulong, c.c_ulong)
 
 
@@ -153,6 +154,11 @@ if len(sys.argv) > 1 and sys.argv[1].endswith(".so"):
     sync_native.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Layout),
                             c.c_size_t, c.POINTER(CacheOps)]
     sync_native.restype = c.c_int
+    initialize_smem_native = library.tetris_modem_initialize_smem_b41
+    initialize_smem_native.argtypes = [c.POINTER(BootPlan), c.c_void_p, c.c_size_t,
+                                      c.c_void_p, c.c_size_t, c.c_void_p, c.c_size_t,
+                                      c.c_size_t, c.POINTER(CacheOps)]
+    initialize_smem_native.restype = c.c_int
 
 
 class ModemSecurityTest(unittest.TestCase):
@@ -160,6 +166,111 @@ class ModemSecurityTest(unittest.TestCase):
     def setUpClass(cls):
         fixtures.SecurityTest.setUpClass()
         cls.fixture = fixtures.SecurityTest()
+
+    def smem_fixture(self, consys=65):
+        data = b"".join(self.signed_groups(smem_fields={0x180: consys, 0x18c: 64}))
+        prepared = PreparedBundle()
+        self.assertEqual(prepare_native(data, len(data), bytes.fromhex(self.fixture.root_pin),
+                                        c.byref(ops), 0x4000, 3, c.byref(prepared)), 0)
+        plan = BootPlan(prepared.bundle.layout, prepared.inputs, prepared.smem)
+
+        def aligned(size):
+            backing = c.create_string_buffer(size + 128)
+            address = (c.addressof(backing) + 127) & ~63
+            c.memset(c.addressof(backing), 0xa5, c.sizeof(backing))
+            return backing, address, size
+
+        banks = [aligned(0x4000), aligned(plan.smem.nc_capacity),
+                 aligned(plan.smem.cache_capacity)]
+        return plan, banks
+
+    @unittest.skipUnless(initialize_smem_native, "service RAM initialization executes in CI")
+    def test_smem_initialize_preserves_consys_and_firmware(self):
+        for consys in (0, 65, 0xd80000):
+            plan, banks = self.smem_fixture(consys)
+            calls = []
+
+            @Flush
+            def flush(ctx, start, end):
+                calls.append((start, end))
+                self.assertEqual(c.string_at(start, end - start), bytes(end - start))
+                return 0
+
+            cache_ops = CacheOps(flush, None)
+            firmware, nc, cache = banks
+            before_plan = bytes(plan)
+            self.assertEqual(initialize_smem_native(c.byref(plan), firmware[1], firmware[2],
+                                                    nc[1], nc[2], cache[1], cache[2], 64,
+                                                    c.byref(cache_ops)), 0)
+            preserve = (consys + 63) & ~63
+            self.assertEqual(c.string_at(firmware[1], firmware[2]), b"\xa5" * firmware[2])
+            self.assertEqual(c.string_at(cache[1], preserve), b"\xa5" * preserve)
+            self.assertEqual(calls, [(nc[1], nc[1] + nc[2]),
+                                     (cache[1] + preserve, cache[1] + cache[2])])
+            for _, address, size in banks:
+                self.assertEqual(c.string_at(address - 1, 1), b"\xa5")
+                self.assertEqual(c.string_at(address + size, 1), b"\xa5")
+            self.assertEqual(bytes(plan), before_plan)
+
+    @unittest.skipUnless(initialize_smem_native, "service RAM initialization executes in CI")
+    def test_smem_invalid_input_never_writes(self):
+        plan, banks = self.smem_fixture()
+        firmware, nc, cache = banks
+        calls = []
+
+        @Flush
+        def flush(ctx, start, end):
+            calls.append((start, end))
+            return 0
+
+        cache_ops = CacheOps(flush, None)
+        arguments = [c.byref(plan), firmware[1], firmware[2], nc[1], nc[2],
+                     cache[1], cache[2], 64, c.byref(cache_ops)]
+        cases = [(0, None), (1, None), (3, None), (5, None), (8, None),
+                 (3, nc[1] + 1), (4, nc[2] - 64), (6, cache[2] - 64),
+                 (7, 0), (7, 3), (3, firmware[1]), (5, nc[1]),
+                 (0, c.cast(nc[1], c.POINTER(BootPlan))),
+                 (8, c.cast(cache[1], c.POINTER(CacheOps))),
+                 (3, c.c_void_p(-64)), (2, 1)]
+        for index, value in cases:
+            changed = arguments.copy()
+            changed[index] = value
+            self.assertLess(initialize_smem_native(*changed), 0, (index, value))
+        original = bytes(plan)
+        for mutation in ("entry", "rows", "capacity", "policy"):
+            c.memmove(c.byref(plan), original, len(original))
+            if mutation == "entry":
+                plan.smem.cache[0].size = 0
+            elif mutation == "rows":
+                plan.smem.nc_rows += 1
+            elif mutation == "capacity":
+                plan.smem.cache_capacity += 64
+            else:
+                plan.inputs.ccb_gear = 99
+            self.assertLess(initialize_smem_native(*arguments), 0, mutation)
+        self.assertEqual(calls, [])
+        for _, address, size in banks:
+            self.assertEqual(c.string_at(address, size), b"\xa5" * size)
+
+    @unittest.skipUnless(initialize_smem_native, "service RAM initialization executes in CI")
+    def test_smem_flush_failure_stops_without_ready_state(self):
+        for failed, error in ((0, -5), (1, -6), (0, 1)):
+            plan, banks = self.smem_fixture()
+            calls = []
+
+            @Flush
+            def flush(ctx, start, end):
+                calls.append((start, end))
+                return error if len(calls) - 1 == failed else 0
+
+            cache_ops = CacheOps(flush, None)
+            firmware, nc, cache = banks
+            before = bytes(plan)
+            self.assertEqual(initialize_smem_native(c.byref(plan), firmware[1], firmware[2],
+                                                    nc[1], nc[2], cache[1], cache[2], 64,
+                                                    c.byref(cache_ops)), error if error < 0 else -5)
+            self.assertEqual(len(calls), failed + 1)
+            self.assertEqual(bytes(plan), before)
 
     def parts(self, bad_marker=None, omit_header=False):
         payload, root, _ = self.fixture.parts()[:3]

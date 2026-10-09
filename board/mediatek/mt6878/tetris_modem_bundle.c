@@ -262,3 +262,57 @@ int tetris_modem_sync_payloads(void *destination, size_t capacity,
 	}
 	return 0;
 }
+
+int tetris_modem_initialize_smem_b41(const struct tetris_modem_boot_plan *plan,
+		void *firmware, size_t firmware_capacity,
+		void *nc, size_t nc_capacity, void *cache, size_t cache_capacity,
+		size_t alignment, const struct tetris_modem_cache_ops *ops)
+{
+	struct tetris_modem_smem_plan expected;
+	unsigned long nc_base = (unsigned long)nc, cache_base = (unsigned long)cache;
+	size_t preserve, mask;
+	int ret;
+
+	if (!valid_span(plan, sizeof(*plan)) || !valid_span(ops, sizeof(*ops)) ||
+	    !ops->flush || !alignment || (alignment & (alignment - 1)) ||
+	    !valid_span(firmware, firmware_capacity) ||
+	    !valid_span(nc, nc_capacity) || !valid_span(cache, cache_capacity))
+		return -EINVAL;
+	if (overlaps(nc, nc_capacity, cache, cache_capacity) ||
+	    overlaps(nc, nc_capacity, firmware, firmware_capacity) ||
+	    overlaps(cache, cache_capacity, firmware, firmware_capacity) ||
+	    overlaps(nc, nc_capacity, plan, sizeof(*plan)) ||
+	    overlaps(cache, cache_capacity, plan, sizeof(*plan)) ||
+	    overlaps(nc, nc_capacity, ops, sizeof(*ops)) ||
+	    overlaps(cache, cache_capacity, ops, sizeof(*ops)))
+		return -EINVAL;
+	ret = tetris_modem_plan_smem_b41(&plan->smem_inputs, &expected);
+	if (ret)
+		return ret;
+	if (memcmp(&expected, &plan->smem, sizeof(expected)))
+		return -EBADMSG;
+	mask = alignment - 1;
+	if ((nc_base & mask) || (cache_base & mask) ||
+	    (nc_capacity & mask) || (cache_capacity & mask) ||
+	    expected.nc_capacity > nc_capacity ||
+	    expected.cache_capacity > cache_capacity ||
+	    !plan->layout.memory_size || plan->layout.memory_size > firmware_capacity)
+		return -ERANGE;
+	/* CONSYS has another owner; do not clear or flush its last cache line. */
+	preserve = expected.cache[0].size;
+	if (preserve) {
+		if (mask > cache_capacity - preserve)
+			return -ERANGE;
+		preserve = (preserve + mask) & ~mask;
+	}
+	if (preserve >= cache_capacity)
+		return -ERANGE;
+	/* No fallible validation after the first RAM write. */
+	memset(nc, 0, nc_capacity);
+	memset((unsigned char *)cache + preserve, 0, cache_capacity - preserve);
+	ret = ops->flush(ops->ctx, nc_base, nc_base + nc_capacity);
+	if (!ret)
+		ret = ops->flush(ops->ctx, cache_base + preserve,
+				 cache_base + cache_capacity);
+	return ret > 0 ? -EIO : ret;
+}

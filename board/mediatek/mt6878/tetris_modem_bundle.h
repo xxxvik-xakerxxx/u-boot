@@ -101,4 +101,22 @@ int tetris_modem_sync_payloads(void *destination, size_t capacity,
 		const struct tetris_modem_layout *layout, size_t alignment,
 		const struct tetris_modem_cache_ops *ops);
 
+/*
+ * Initialize newly allocated B4.1 service RAM after successful authenticated
+ * load. Caller owns both mapped banks exclusively and holds MD in reset.
+ * Preserve the entire CONSYS prefix (including its last cache line); clear
+ * the remaining cache bank and NC bank, including owned padding. Recompute
+ * the service plan before writing and reject overlap with firmware/metadata.
+ * All spans must cover complete cache lines. Flush both cleared ranges before
+ * returning success. A flush failure leaves cleared RAM, never boot authority;
+ * caller must not release reset or publish ready tags. No allocator, SMC,
+ * hardware register write or automatic caller. The plan must originate from
+ * an authenticated load, not an arbitrary caller-synthesized structure.
+ * Cache callbacks/context must survive and must not modify these banks.
+ */
+int tetris_modem_initialize_smem_b41(const struct tetris_modem_boot_plan *plan,
+		void *firmware, size_t firmware_capacity,
+		void *nc, size_t nc_capacity, void *cache, size_t cache_capacity,
+		size_t alignment, const struct tetris_modem_cache_ops *ops);
+
 #endif

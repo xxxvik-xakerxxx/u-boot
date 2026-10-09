@@ -889,4 +889,31 @@ required. No modem activation or new phone/SIM support is claimed.
 
 CI ``37883464473`` passed native verification tests, ARM64 build and LK
 packaging for source ``30e73368db6477708cad54148c70ce33ab621bd7``.
+
+Fresh B4.1 service-memory initialization
+--------------------------------------
+
+``tetris_modem_initialize_smem_b41()`` initializes newly allocated, mapped
+service banks after an authenticated load. It recomputes the service layout
+from the authenticated metadata, rejects mismatched tables, undersized or
+unaligned banks, wrapping spans, and overlap with firmware, the other bank,
+metadata or callback storage before any write. It clears owned NC RAM and the
+cache-bank suffix, including owned alignment padding, then synchronizes both
+written ranges through the cache adapter. A cache failure stops the operation
+and must prevent reset release or ready-tag publication.
+
+The CONSYS prefix and its last cache line are preserved, never cleared or
+flushed by this operation. This reflects the separate connectivity ownership;
+the pinned B4.1 kernel ``ap_md_mem.c`` likewise excludes CONSYS from first-boot
+clearing. This helper is for fresh reservations, not a reproduction of Linux's
+per-service reset-clear policy or permission to erase inherited DRDI/USIP data.
+Caller must establish exclusive ownership of the written ranges, authenticated
+plan provenance and MD-reset state. No fixed physical address, allocation,
+SMC, reset release, DT activation or automatic boot caller is added.
+
+Native CI tests use synthetic signed firmware plus both synthetic and stock
+CONSYS sizes. They verify complete cleared ranges, untouched firmware/prefix
+and guard bytes, invalid-input no-write behavior, and first/second flush
+failures. Native and ARM64 CI are pending; no phone change or SIM/calls is
+claimed by these tests.
 This artifact was not installed; the proven SCP-enabled loader is retained.
