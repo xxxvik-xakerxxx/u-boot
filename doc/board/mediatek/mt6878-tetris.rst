@@ -998,5 +998,12 @@ No failed systemd unit or critical kernel crash signature was found; vendor
 warnings remain. The user confirmed normal display and touch. Sensor startup
 was disabled on the clean rootfs; its previous opt-in was restored without
 starting/reloading modules on the warm handoff. Full poweroff was issued for
-the physical cold-start test, whose results remain pending. Modem execution,
+the physical cold-start test. User-confirmed power-on produced boot
+``436b22a7-5886-4e19-b692-8ccd6e92b81d``: modem RAM preparation again returned
+zero error, with both reservations present. Sensor transport automatically
+reported firmware ready, 24 inventory entries and mask 31 at 17.114 seconds;
+SensorProxy started at 17.488 seconds and real light events were received.
+USB/SSH and another hash-verified 32 MiB transfer passed; no failed units or
+critical kernel crash signature was found. This is one cold-start pass after
+explicit sensor opt-in, not completed lifecycle/portability. Modem execution,
 secure protection/remap ownership and the CCCI-ready handoff remain open.
