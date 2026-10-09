@@ -491,8 +491,12 @@ An empty ordinary run or unknown contract is rejected. Tests cover both the
 audited OTA NVRAM profile (``0x16a040``, gap ``0x15fc0``) and the installed
 partition profile (``0x163780``, gap ``0x1c880``), plus both contracts over
 the existing malformed-table cases. These values are test vectors only.
-Static whitespace/checkpatch validation passed; native and ARM64 CI results
-are pending. This change publishes no new tags and enables no modem execution.
+Static whitespace/checkpatch validation passed. CI ``37912420528`` passed at
+``c2dd8be930ad917fd3c039309164dd43173aace9``: CCCI host tests, SCP/modem
+certificate tests, initramfs-only and full ARM64 builds, boot-flow validation
+and LK packaging. This change publishes no new tags and enables no modem
+execution. The installed handset retains the separately verified ``56de656803``
+loader; this candidate has not been flashed or live-tested.
 Preparation does not yet reserve RAM, place images, apply protection, release
 reset or advertise modem readiness.
 
