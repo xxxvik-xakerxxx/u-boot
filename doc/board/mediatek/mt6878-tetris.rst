@@ -944,6 +944,16 @@ reset release, DMA, CCCI-ready tag or Linux modem consumer is enabled. The
 fresh CONSYS prefix is not a valid connectivity handoff: its real shared-memory
 ownership still has to be established before modem execution. Likewise the
 profile does not establish SKU/rollback policy or authorization to start the
-loaded firmware. Native/ARM64 CI and live boot testing of this profile remain
-pending.
-This artifact was not installed; the proven SCP-enabled loader is retained.
+loaded firmware. Native tests, initramfs-only ARM64, full ARM64 and LK
+packaging passed CI ``37896667322`` at
+``c9a2ee3e67f2ced75e3d7d2e9d8bbaa95e1dd790``. The explicit SCP plus modem-load
+artifact's archive digest and image hashes passed, as did comparison of its
+LK header and preserved tail against the previous SCP-enabled image.
+
+The image was flashed only to ``lk_a`` on an active-slot-A handset. Stock
+``lk_b`` was verified before the write and left untouched. Following reboot,
+the phone enumerated pmOS USB NCM interfaces, but macOS did not register its
+BSD network interface. SSH and the outgoing modem-load diagnostics remain
+unavailable; neither preparation success nor a boot regression is established.
+No further hardware experiment was attempted, and physical USB reconnect was
+requested. The prior SCP-enabled ``fef0154b`` CI image is retained for rollback.
