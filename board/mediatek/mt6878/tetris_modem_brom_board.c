@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0+
+#ifndef TETRIS_BROM_BOARD_HOST_TEST
 #include <blk.h>
 #include <bootm.h>
 #include <cpu_func.h>
@@ -14,9 +15,24 @@
 #include "tetris_modem_final.h"
 #include "tetris_modem_linux_policy.h"
 #include "tetris_modem_loaded_boot.h"
+#endif
+#include "tetris_linux_fdt_bounds.h"
 
 static unsigned int attempted;
 static int first_error;
+
+enum brom_board_stage {
+	BROM_INPUT = 1, BROM_FDT, BROM_CAPACITY, BROM_ALLOC, BROM_MAP,
+	BROM_CLONE, BROM_RESERVATION, BROM_PLACEHOLDER, BROM_CONFIG,
+	BROM_CONSUMERS, BROM_STORAGE, BROM_MODEM_GPT, BROM_TEE_GPT,
+	BROM_POLICY, BROM_LOADER_REPORT, BROM_FINISHED,
+};
+
+static void latch(int error)
+{
+	if (error && !first_error)
+		first_error = error < 0 ? error : -EPROTO;
+}
 
 static void put32(unsigned char *p, unsigned int value)
 {
@@ -50,15 +66,53 @@ static int disabled(const void *fdt, const char *compatible)
 	}
 }
 
+/* Independent observation fields; never permission to execute hardware.
+ * Try every field even if another fails, preserving the first publication error.
+ */
+static int publish(void *fdt, const unsigned char recorded[80], unsigned int stage,
+		   unsigned int status, unsigned int entered, int publication_error)
+{
+	const char *names[] = {
+		"nothing,modem-brom-preflight-stage",
+		"nothing,modem-brom-preflight-status",
+		"nothing,modem-brom-preflight-error",
+		"nothing,modem-brom-loader-entered",
+		"nothing,modem-brom-publication-error",
+	};
+	unsigned int values[] = { stage, status, (unsigned int)first_error, entered,
+				  (unsigned int)publication_error };
+	unsigned int i;
+	int chosen, ret, error = 0;
+
+	chosen = fdt_path_offset(fdt, "/chosen");
+	if (chosen == -FDT_ERR_NOTFOUND)
+		chosen = fdt_add_subnode(fdt, 0, "chosen");
+	if (chosen < 0)
+		return chosen;
+	ret = fdt_setprop(fdt, chosen, "nothing,modem-brom-report", recorded, 80);
+	if (ret)
+		error = ret;
+	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		chosen = fdt_path_offset(fdt, "/chosen");
+		ret = chosen < 0 ? chosen : fdt_setprop_u32(fdt, chosen, names[i], values[i]);
+		if (ret && !error)
+			error = ret;
+	}
+	return error;
+}
+
 int tetris_modem_brom_only_board(struct bootm_headers *images)
 {
 	struct tetris_modem_loaded_report report;
 	struct blk_desc *dev;
 	struct disk_partition part;
 	phys_addr_t address = 0x80000000ULL;
-	void *final;
-	size_t capacity;
-	int ret, report_ret, chosen, publish_ret;
+	void *final = NULL, *original = NULL;
+	size_t capacity = 0;
+	unsigned int stage = BROM_INPUT, valid = 0, allocated = 0, committed = 0;
+	unsigned int entered = 0;
+	int ret, report_ret = -EINPROGRESS, publish_ret, cleanup_ret;
+	int publication_error = 0;
 	unsigned char recorded[80] = { 0 };
 
 	/* Explicit build opt-in only, not an environment/chosen permission flag. */
@@ -67,69 +121,50 @@ int tetris_modem_brom_only_board(struct bootm_headers *images)
 	if (attempted)
 		return first_error ? first_error : -EALREADY;
 	attempted = 1;
+	put32(recorded, 1);
+	put32(recorded + 4, (unsigned int)-EINPROGRESS);
+	put32(recorded + 8, (unsigned int)-EINPROGRESS);
 	if (!images || !images->ft_addr || !images->ft_len) {
 		ret = -EINVAL;
 		goto fail;
 	}
-	if (IS_ENABLED(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC) ||
-	    IS_ENABLED(CONFIG_TETRIS_MODEM_RESERVE_DIAGNOSTIC) ||
-	    IS_ENABLED(CONFIG_TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC) ||
-	    IS_ENABLED(CONFIG_TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC)) {
-		ret = -EBUSY;
-		goto fail;
-	}
-	ret = fdt_check_full(images->ft_addr, images->ft_len);
-	if (!ret)
-		ret = disabled(images->ft_addr, "mediatek,mddriver");
-	if (!ret)
-		ret = disabled(images->ft_addr, "mediatek,mt6878-modem-power-controller");
-	if (!ret)
-		ret = disabled(images->ft_addr, "mediatek,mt6878-modem-preflight");
+	original = images->ft_addr; /* Borrowed virtual pointer, not a physical address. */
+	stage = BROM_FDT;
+	ret = tetris_linux_fdt_sync(images);
 	if (ret)
 		goto fail;
-	/* Same user-storage descriptor as existing Tetris pmOS/rootfs boot path.
-	 * Validate required GPT names; policy producer independently selects the
-	 * actual UFS boot LUN and measured GFH, never assumes dev0/preloader slot.
-	 */
-	ret = blk_get_desc(UCLASS_SCSI, 2, &dev);
-	if (ret)
-		goto fail;
-	ret = part_get_info_by_name(dev, "modem_a", &part);
-	if (ret < 0)
-		goto fail;
-	ret = part_get_info_by_name(dev, "tee_a", &part);
-	if (ret < 0)
-		goto fail;
+	valid = 1;
+	stage = BROM_CAPACITY;
 	if ((size_t)fdt_totalsize(images->ft_addr) > 0x200000UL - 8192) {
 		ret = -E2BIG;
 		goto fail;
 	}
 	capacity = ((size_t)fdt_totalsize(images->ft_addr) + 8192 + 4095) & ~4095UL;
+	stage = BROM_ALLOC;
 	ret = lmb_alloc_mem(LMB_MEM_ALLOC_MAX, 4096, &address, capacity, LMB_NOOVERWRITE);
 	if (ret)
 		goto fail;
+	allocated = 1;
+	stage = BROM_MAP;
 	final = map_sysmem(address, capacity);
 	if (!final) {
 		ret = -ENOMEM;
-		goto release;
+		goto fail;
 	}
 	memset(final, 0, capacity);
+	stage = BROM_CLONE;
 	ret = fdt_open_into(images->ft_addr, final, capacity);
-	if (!ret)
-		ret = fdt_add_mem_rsv(final, address, capacity);
-	chosen = ret ? ret : fdt_path_offset(final, "/chosen");
-	if (!ret && chosen == -FDT_ERR_NOTFOUND)
-		chosen = fdt_add_subnode(final, 0, "chosen");
-	if (!ret && chosen < 0)
-		ret = chosen;
-	if (!ret) {
-		ret = fdt_delprop(final, chosen, "nothing,modem-brom-report");
-		if (ret == -FDT_ERR_NOTFOUND)
-			ret = 0;
-	}
+	if (ret)
+		goto fail;
+	stage = BROM_RESERVATION;
+	ret = fdt_add_mem_rsv(final, address, capacity);
+	if (ret)
+		goto fail;
+	stage = BROM_PLACEHOLDER;
+	ret = publish(final, recorded, stage, 0, 0, 0);
 	if (ret) {
-		unmap_sysmem(final);
-		goto release;
+		publication_error = ret;
+		goto fail;
 	}
 	/* Commit the clean clone BEFORE the loader reserves anything. Therefore
 	 * even failed bootstrap/cleanup retains all acquired MD memory in Linux's
@@ -137,8 +172,49 @@ int tetris_modem_brom_only_board(struct bootm_headers *images)
 	 */
 	images->ft_addr = final;
 	images->ft_len = fdt_totalsize(final);
+	committed = 1;
+	stage = BROM_CONFIG;
+	if (IS_ENABLED(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC) ||
+	    IS_ENABLED(CONFIG_TETRIS_MODEM_RESERVE_DIAGNOSTIC) ||
+	    IS_ENABLED(CONFIG_TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC) ||
+	    IS_ENABLED(CONFIG_TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC)) {
+		ret = -EBUSY;
+		goto fail;
+	}
+	stage = BROM_CONSUMERS;
+	ret = disabled(final, "mediatek,mddriver");
+	if (!ret)
+		ret = disabled(final, "mediatek,mt6878-modem-power-controller");
+	if (!ret)
+		ret = disabled(final, "mediatek,mt6878-modem-preflight");
+	if (ret)
+		goto fail;
+	stage = BROM_STORAGE;
+	ret = blk_get_desc(UCLASS_SCSI, 2, &dev);
+	if (ret)
+		goto fail;
+	stage = BROM_MODEM_GPT;
+	ret = part_get_info_by_name(dev, "modem_a", &part);
+	if (ret < 0)
+		goto fail;
+	stage = BROM_TEE_GPT;
+	ret = part_get_info_by_name(dev, "tee_a", &part);
+	if (ret < 0)
+		goto fail;
+	stage = BROM_POLICY;
+	ret = publish(final, recorded, stage, 0, 1, 0);
+	if (ret) {
+		publication_error = ret;
+		goto fail;
+	}
+	entered = 1;
+	flush_dcache_range((unsigned long)final, (unsigned long)final + capacity);
+	images->ft_len = fdt_totalsize(final);
 	ret = tetris_modem_linux_b41_once(final, dev, 'a');
+	latch(ret);
+	stage = BROM_LOADER_REPORT;
 	report_ret = tetris_modem_loaded_boot_report(&report);
+	latch(report_ret);
 	printf("Tetris MD BROM-only result=%d report=%d; no CCCI descriptor\n", ret, report_ret);
 	if (!report_ret) {
 		printf("Tetris MD stage=%u error=%d hw_stage=%u hw_error=%d cleanup=%u/%d\n",
@@ -168,28 +244,47 @@ int tetris_modem_brom_only_board(struct bootm_headers *images)
 		put64(recorded + 64, report.hardware.reply[2]);
 		put64(recorded + 72, report.hardware.reply[3]);
 	}
-	chosen = fdt_path_offset(final, "/chosen");
-	publish_ret = chosen < 0 ? chosen : fdt_setprop(final, chosen,
-		"nothing,modem-brom-report", recorded, sizeof(recorded));
-	if (publish_ret) {
-		printf("Tetris MD observation record error=%d\n", publish_ret);
-		if (!ret)
-			ret = publish_ret;
-	}
-	/* Flush the updated reservation DT even on first hardware failure. Retain
-	 * all MD allocations; never retry, free active memory, or reset implicitly.
-	 */
-	flush_dcache_range((unsigned long)final, (unsigned long)final + capacity);
-	images->ft_len = fdt_totalsize(final);
-	if (!ret && report_ret)
-		ret = report_ret;
-	if (!ret)
-		return 0;
-	goto fail;
-release:
-	lmb_free(address, capacity, LMB_NOOVERWRITE | LMB_NONOTIFY);
-fail:
 	if (!first_error)
-		first_error = ret < 0 ? ret : -EPROTO;
+		stage = BROM_FINISHED;
+	ret = first_error;
+fail:
+	latch(ret);
+	/* Before the clone commits, only a validated borrowed DT may be touched.
+	 * Failure publication is best-effort, never a hardware retry or fallback.
+	 */
+	if (valid) {
+		void *target = committed ? final : original;
+
+		if (!entered) {
+			put32(recorded + 4, (unsigned int)first_error);
+			put32(recorded + 8, (unsigned int)-EINPROGRESS);
+		}
+		publish_ret = publish(target, recorded, stage, first_error ? 2 : 1,
+				      entered, publication_error);
+		if (publish_ret) {
+			if (!publication_error)
+				publication_error = publish_ret;
+			latch(publish_ret);
+			/* A second observation-only update may expose the publication error;
+			 * it must not overwrite the first operational error or run hardware.
+			 */
+			publish(target, recorded, stage, 2, entered, publication_error);
+			printf("Tetris MD report publication error=%d first=%d\n",
+			       publish_ret, first_error);
+		}
+		flush_dcache_range((unsigned long)target,
+			(unsigned long)target + (committed ? capacity : images->ft_len));
+		images->ft_len = fdt_totalsize(target);
+	}
+	if (!committed) {
+		if (final)
+			unmap_sysmem(final);
+		if (allocated) {
+			cleanup_ret = lmb_free(address, capacity, LMB_NOOVERWRITE | LMB_NONOTIFY);
+			latch(cleanup_ret);
+		}
+	}
+	printf("Tetris MD board stage=%u first=%d loader-entered=%u\n",
+	       stage, first_error, entered);
 	return first_error;
 }

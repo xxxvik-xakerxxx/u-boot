@@ -63,6 +63,7 @@ static u64 tetris_test_get_le64(const void *ptr)
 #include "tetris_gpueb_flat_hook.h"
 #include "tetris_modem_reserve.h"
 #include "tetris_modem_emi.h"
+#include "tetris_linux_fdt_bounds.h"
 #endif
 
 #define TETRIS_CCCI_MAX_INFO_SIZE	0x10000U
@@ -1739,6 +1740,11 @@ void board_prep_linux(struct bootm_headers *images)
 {
 	int ret;
 	void *fdt = (void *)images->ft_addr;
+
+	/* bootm's final fixups resize/re-reserve this DT independently of FIT size. */
+	ret = tetris_linux_fdt_sync(images);
+	if (ret)
+		panic("Tetris: refusing Linux preparation with unbounded DT: %d\n", ret);
 
 	if (IS_ENABLED(CONFIG_TETRIS_SCP_HANDOFF_INVENTORY)) {
 		/*
