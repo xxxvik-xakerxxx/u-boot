@@ -92,3 +92,25 @@ exercises slot-1/slot-2 selection, unrelated controllers/targets, duplicates,
 missing owners and transport/descriptor failures under ASAN/UBSAN. The
 correction requires a new CI image and cold handset readback; source review
 alone does not establish physical modem startup.
+
+## c2e998b cold readback and HPB user LU
+
+`c2e998bcbf5b` passed CI 38066945059 and was installed in `lk_a` with image
+SHA256 `aea9a73c42b1d4c565c27301485e68190a1b9071779da39636facd78e0f610ca`.
+Its first cold readback still records result `-EPROTO`, report-fetch `-EINVAL`
+and board stage 15, with no loaded owner. USB and sensor inventory recover.
+This fix was necessary but did not establish modem startup.
+
+Read-only Linux UFS sysfs shows enabled boot-ID 1; LUs 0/1 have enable 1 and
+boot IDs 1/2, while the user LU has enable 2 and boot-ID 0. The matching Nothing
+vendor source `ee2be53cb75670b548948636a0db1d1ff112bf12`,
+`drivers/ufs/vendor/ufsshpb.c:ufsshpb_get_lu_info`, consumes `bLUEnable == 0x02`
+as the legitimate HPB-enabled state. Our identity reader rejected it while
+scanning all sibling LUs. Accept enable 1 or 2 while retaining every length,
+type, index, boot-ID and transport check. Zero/unknown enable still rejects;
+boot selection remains the unique actual `bBootLunID`, not a fixed index.
+No boot attribute, partition, authentication or permission policy is changed.
+
+The CI fixture extracts the actual UFS identity function and mocks only its
+read-query boundary; it includes the observed HPB user-LU tuple plus strict
+error/output-lifetime cases. A later cold readback is still required.

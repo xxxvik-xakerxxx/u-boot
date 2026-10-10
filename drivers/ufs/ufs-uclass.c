@@ -1553,9 +1553,13 @@ int ufs_read_lun_boot_identity(struct udevice *scsi, unsigned int lun,
 		QUERY_DESC_IDN_UNIT, lun, 0, unit, &length);
 	if (ret)
 		return ret;
-	/* UFS unit descriptor: length/type/index/enable/boot-ID at0..4. */
+	/* bLUEnable=2 is a valid HPB-enabled LU, including a non-boot user LU.
+	 * See the matching Nothing B4.1 ufsshpb_get_lu_info() consumer. Selection
+	 * still uses bBootLunID, not LU index or HPB state.
+	 */
 	if (length < 5 || unit[0] < 5 || unit[0] > length ||
-	    unit[1] != QUERY_DESC_IDN_UNIT || unit[2] != lun || unit[3] != 1 || unit[4] > 2)
+	    unit[1] != QUERY_DESC_IDN_UNIT || unit[2] != lun ||
+	    (unit[3] != 1 && unit[3] != 2) || unit[4] > 2)
 		return -EPROTO;
 	*enabled_boot = enabled;
 	*unit_boot = unit[4];
