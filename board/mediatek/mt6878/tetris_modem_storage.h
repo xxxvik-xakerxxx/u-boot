@@ -3,6 +3,21 @@
 #define __TETRIS_MODEM_STORAGE_H
 
 #include "tetris_modem_bundle.h"
+#include "tetris_modem_emi_rows.h"
+
+struct blk_desc;
+/* Cache pointer-free EMI metadata BEFORE snapshot release. Actual resources
+ * and resolved options belong to the load owner. All output follows successful
+ * staging release and payload cache synchronization. No execution/board hook.
+ */
+int tetris_modem_load_slot_rows_b41(struct blk_desc *dev, char slot,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity, unsigned int ccb_gear,
+		const char *phy_gear, const unsigned char preloader_sha256[32],
+		const struct tetris_modem_emi_resources *resources,
+		struct tetris_modem_boot_plan *plan,
+		struct tetris_modem_emi_rows *rows);
 
 struct tetris_modem_storage {
 	unsigned long long device_blocks;

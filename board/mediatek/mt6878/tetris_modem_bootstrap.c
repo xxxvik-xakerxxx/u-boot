@@ -30,7 +30,6 @@
 
 static struct {
 	struct tetris_modem_bootstrap_plan input;
-	unsigned long long policy[12][TETRIS_MODEM_EMI_POLICY_WORDS];
 	struct tetris_modem_bootstrap_report report;
 	unsigned int attempted;
 	unsigned int mutated, cleanup_attempted;
@@ -151,39 +150,89 @@ static int md_boot_cold_off(void)
 
 static int md_boot_plan(void)
 {
+	const struct tetris_modem_emi_resources *r = &boot.input.resources;
 	struct tetris_modem_remap remap;
-	struct tetris_modem_emi_range encoded;
-	unsigned int i, active = 0;
+	unsigned long long profile[8];
+	unsigned int i;
 	int ret;
 
-	ret = tetris_modem_plan_remap(boot.input.base, boot.input.capacity,
-		boot.input.dram_base, boot.input.dram_size, &remap);
+	ret = tetris_modem_plan_emi_policy(boot.input.preloader_sha256, 32, profile);
+	if (!ret)
+		ret = tetris_modem_plan_remap(r->firmware.base, r->firmware.capacity,
+			r->dram_base, r->dram_size, &remap);
 	if (ret)
 		return md_boot_fail(ret);
+	/* Bind every active row to its cached allocation, never a generic window.
+	 * Source/role/policy completeness comes from the internal authenticated
+	 * loader producer; this public draft is not a cryptographic certificate.
+	 */
 	for (i = 0; i < 12; i++) {
-		const struct tetris_modem_bootstrap_range *r = &boot.input.ranges[i];
+		const struct tetris_modem_emi_row *row = &boot.input.rows.row[i];
+		const struct tetris_modem_emi_window *w = i < 7 || i == 8 ?
+			&r->firmware : i == 7 ? &r->sib : i == 10 ? &r->nc : &r->cache;
 
-		boot.report.slot = i + 32;
-		if (!r->size) {
-			if (r->start)
-				return md_boot_fail(-EINVAL);
-			continue;
-		}
-		if (r->start < boot.input.base ||
-		    r->start - boot.input.base >= boot.input.capacity ||
-		    r->size > boot.input.capacity - (r->start - boot.input.base))
+		if (row->kind && (row->reservation.base != w->base ||
+		    row->reservation.capacity != w->capacity))
 			return md_boot_fail(-ERANGE);
-		ret = tetris_modem_plan_emi(r->start, r->size, i + 32, &encoded);
-		if (!ret)
-			ret = tetris_modem_plan_emi_policy(boot.input.preloader_sha256,
-				i + 32, boot.policy[i]);
-		if (ret)
-			return md_boot_fail(ret);
-		active++;
 	}
-	/* Require stock's first slot; layout/role completeness belongs to its producer. */
-	if (!active || !boot.input.ranges[0].size)
-		return md_boot_fail(-EINVAL);
+	/* Final bank4 view is four NC plus four cache 32MiB pages. LK first
+	 * programs eight NC entries then overwrites4..7 with cache while MD OFF.
+	 * Entire final mappings, not only used service bytes, must remain owned.
+	 */
+	if (r->nc.capacity < 0x8000000ULL || r->cache.capacity < 0x8000000ULL ||
+	    boot.input.rows.smem.nc_capacity > 0x8000000ULL ||
+	    boot.input.rows.smem.cache_capacity > 0x8000000ULL ||
+	    r->nc.base > 0x800000000ULL - 0x10000000ULL ||
+	    r->cache.base > 0x800000000ULL - 0x8000000ULL)
+		return md_boot_fail(-ERANGE);
+	return 0;
+}
+
+static int md_boot_smem_remap(void)
+{
+	/* ATF 0x1be10..0x1bf40: command3 x2/x3=physical low/high,
+	 * x4=index, x0=status, x1=actual 32-bit register after RMW.
+	 */
+	static const unsigned int shift[8] = { 20, 0, 10, 20, 0, 10, 20, 0 };
+	static const unsigned int reg[8] = { 0, 1, 1, 1, 2, 2, 2, 3 };
+	unsigned int known_mask[4] = { 0 }, known_value[4] = { 0 };
+	unsigned int call;
+
+	for (call = 0; call < 12; call++) {
+		struct arm_smccc_res reply = { 0 };
+		unsigned int index = call < 8 ? call : call - 4;
+		unsigned long long base = call < 8 ? boot.input.resources.nc.base :
+			boot.input.resources.cache.base;
+		unsigned long long address = base + (unsigned long long)
+			(call < 8 ? call : call - 8) * 0x2000000ULL;
+		unsigned int mask = 0x3ffU << shift[index];
+		unsigned int expected = (unsigned int)((address >> 25) & 0x3ff) << shift[index];
+		unsigned int word = reg[index];
+
+		boot.report.bank_call = call;
+		boot.report.bank_index = index;
+		arm_smccc_smc(0xc200040bU, 3, (unsigned int)address,
+			(unsigned int)(address >> 32), index, 0, 0, 0, &reply);
+		boot.report.bank_reply[call][0] = reply.a0;
+		boot.report.bank_reply[call][1] = reply.a1;
+		boot.report.bank_reply[call][2] = reply.a2;
+		boot.report.bank_reply[call][3] = reply.a3;
+		memcpy(boot.report.reply, boot.report.bank_reply[call], sizeof(boot.report.reply));
+		if (reply.a0) {
+			unsigned long long status = reply.a0;
+
+			if (status >= 0xfffff001ULL && status <= 0xffffffffULL)
+				return md_boot_fail(-(int)(0x100000000ULL - status));
+			if (status >= ~0ULL - 4094)
+				return md_boot_fail(-(int)(~status + 1));
+			return md_boot_fail(-EPROTO);
+		}
+		known_mask[word] |= mask;
+		known_value[word] = (known_value[word] & ~mask) | expected;
+		if (reply.a1 > 0xffffffffULL ||
+		    ((unsigned int)reply.a1 & known_mask[word]) != known_value[word])
+			return md_boot_fail(-EIO);
+	}
 	return 0;
 }
 
@@ -237,23 +286,22 @@ int tetris_modem_bootstrap_once(struct blk_desc *dev,
 	if (ret)
 		return ret;
 	boot.report.stage = TETRIS_MD_BOOT_EMI;
-	for (i = 0; i < 12; i++) {
-		const struct tetris_modem_bootstrap_range *r = &boot.input.ranges[i];
-
-		if (!r->size)
-			continue;
-		boot.report.slot = i + 32;
-		ret = tetris_modem_boot_secure_range(secure, r->start, r->size,
-			i + 32, boot.input.base, boot.input.capacity, boot.policy[i]);
-		if (ret)
-			goto secure_failure;
-	}
+	ret = tetris_modem_emi_rows_program(&boot.input.rows, &tetris_modem_emi_rows_hw_ops,
+		&boot.report.emi);
+	boot.report.slot = boot.report.emi.slot;
+	if (ret)
+		return md_boot_fail(ret);
 	boot.report.stage = TETRIS_MD_BOOT_REMAP;
 	boot.report.slot = 0;
-	ret = tetris_modem_boot_secure_remap(secure, boot.input.base,
-		boot.input.capacity, boot.input.dram_base, boot.input.dram_size);
+	ret = tetris_modem_boot_secure_remap(secure, boot.input.resources.firmware.base,
+		boot.input.resources.firmware.capacity, boot.input.resources.dram_base,
+		boot.input.resources.dram_size);
 	if (ret)
 		goto secure_failure;
+	boot.report.stage = TETRIS_MD_BOOT_SMEM_REMAP;
+	ret = md_boot_smem_remap();
+	if (ret)
+		return ret;
 	/* LK 0x2542c: request8 closes further bootloader remap programming.
 	 * This is top-level CCCI/8, NOT the no-op POWER_CONFIG subcommand8.
 	 */

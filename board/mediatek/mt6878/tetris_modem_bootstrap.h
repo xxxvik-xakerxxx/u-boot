@@ -3,20 +3,16 @@
 #define __TETRIS_MODEM_BOOTSTRAP_H
 
 #include "tetris_modem_boot_secure.h"
+#include "tetris_modem_emi_rows.h"
 
-/* Slot order is the actual LK table: 32..43. Zero size means inactive.
- * This is a transaction input, NOT an authentication/ownership certificate.
- * Construct it inside the existing authenticated loader/LMB/cache lifetime.
- * Do not expose it through a command, chosen properties or userspace input.
+/* Pointer-free source-derived rows cached BEFORE authenticated snapshot release.
+ * Cache-clean placed images and initialized service banks belong to the loader
+ * owner. No API accepting mutable placed RAM or caller readiness booleans.
  */
-struct tetris_modem_bootstrap_range {
-	unsigned long long start, size;
-};
-
 struct tetris_modem_bootstrap_plan {
-	unsigned long long base, capacity, dram_base, dram_size;
+	struct tetris_modem_emi_resources resources;
+	struct tetris_modem_emi_rows rows;
 	unsigned char preloader_sha256[32];
-	struct tetris_modem_bootstrap_range ranges[12];
 };
 
 enum tetris_modem_bootstrap_stage {
@@ -25,6 +21,7 @@ enum tetris_modem_bootstrap_stage {
 	TETRIS_MD_BOOT_COLD_OFF,
 	TETRIS_MD_BOOT_EMI,
 	TETRIS_MD_BOOT_REMAP,
+	TETRIS_MD_BOOT_SMEM_REMAP,
 	TETRIS_MD_BOOT_REMAP_LOCK,
 	TETRIS_MD_BOOT_CLOCK,
 	TETRIS_MD_BOOT_ISOLATION,
@@ -61,13 +58,17 @@ struct tetris_modem_bootstrap_report {
 	unsigned long long reply[4];
 	int error;
 	struct tetris_modem_bootstrap_cleanup cleanup;
+	struct tetris_modem_emi_rows_transaction emi;
+	unsigned int bank_index, bank_call;
+	unsigned long long bank_reply[12][4];
 };
 
 /* One attempt per AP boot, on the primary CPU before Linux/idle/VCOREFS entry.
  * Requires the matching stock ATF/BL2 -> NS BL33 chain and existing loader's
  * authenticated, cache-clean, exclusively LMB-reserved images/service banks.
  * No permission booleans, guessed reset writes or automatic DT publication.
- * Every active slot must be resolved: unsupported 39/40 fail BEFORE mutation.
+ * All rows (including PHY39/preset40) are derived before mutation, not supplied
+ * as raw ranges. NC/cache final 128MiB mappings must fit owned reservations.
  * Success means actual four-one BROM replies and stock-style powered handoff,
  * not SIM registration or a transport READY event. After our own MMIO writes,
  * failure attempts LK's bounded protect/off/isolate/gate cleanup. First fault

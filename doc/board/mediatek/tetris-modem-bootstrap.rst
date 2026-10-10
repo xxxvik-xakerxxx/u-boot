@@ -31,15 +31,23 @@ handles optional PHY capture and the real slot40 padding fragment. Its secure
 transaction validates the existing policy, applies only the matching ATF preset,
 then verifies and programs the range once. Full reservations must not overlap;
 the unused firmware tail is not available to a second allocation.
-These sources match pmOS commit ``c4afd07``. The 20 native fault cases are being
-checked in CI 38025125760; ARM64 compilation is separate from hardware execution.
+The 20 native EMI fault cases passed pmOS CI 38025322548. Its first fixture
+failure used the wrong CONSYS field offset and was corrected without relaxing
+production checks. ARM64 compilation is separate from hardware execution.
 
-Before any caller is enabled, the authenticated loader must produce all active
-EMI rows, initialize and cache-clean the reserved service banks, retain ownership
-through physical bootstrap and publish the complete existing CCCI handoff tags.
-The existing bootstrap still uses its older range API and rejects active
-slots39/40. Its EMI phase must be replaced by the typed transaction, not preceded
-by it: programming both would consume the same one-shot guards twice. NC/cache
-bank remaps and the real resource owner are not supplied by the row producer.
+The bootstrap now uses the typed EMI transaction exactly once and implements
+the stock twelve NC/cache bank remaps with complete field readback verification.
+``tetris_modem_loaded_boot_once`` owns separate 32-MiB-aligned firmware, NC,
+cache and optional SIB reservations. It derives all row metadata from the
+authenticated snapshot before copying and releasing it, initializes and
+cache-cleans services, then calls the actual bounded bootstrap. Only CPU
+mappings are dropped afterwards; final reservations remain owned on failure.
+The sources match pmOS commit ``9e2e01b``; signed input, 37 earlier bootstrap,
+20 EMI, 41 integrated-bootstrap and 17 allocation-owner sanitizer cases passed
+CI 38026075076. Actual ARM64 compilation of the new load owner remains pending.
+
+No board hook invokes this owner. Before activation, actual boot-option and
+preloader identity producers, storage lifetime faults and complete CCCI handoff
+tags must be connected. Passing a caller-supplied hash is not runtime evidence.
 The existing stored-ATF profile check is not
 runtime attestation and does not support arbitrary boot chains.

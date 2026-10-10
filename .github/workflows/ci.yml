@@ -42,6 +42,11 @@ on:
         required: false
         type: boolean
         default: false
+      gpueb_flat_retention:
+        description: 'Retain authenticated GPUEB bytes for private root-only analysis; no GPU start'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-tetris:
@@ -133,7 +138,7 @@ jobs:
             --enable TETRIS_SCP_TCM_DIAGNOSTIC \
             --enable TETRIS_SCP_SECURE_DIAGNOSTIC
           scripts/config --file build-initramfs-only/.config \
-            --enable TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC
+            --enable TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC
           scripts/config --file build-initramfs-only/.config \
             --enable TETRIS_MODEM_RESERVE_DIAGNOSTIC
           scripts/config --file build-initramfs-only/.config \
@@ -153,6 +158,9 @@ jobs:
             board/mediatek/mt6878/tetris_gpueb_layout.o \
             board/mediatek/mt6878/tetris_gpueb_prepare.o \
             board/mediatek/mt6878/tetris_gpueb_segments.o \
+            board/mediatek/mt6878/tetris_gpueb_flat.o \
+            board/mediatek/mt6878/tetris_gpueb_flat_publish.o \
+            board/mediatek/mt6878/tetris_gpueb_flat_hook.o \
             board/mediatek/mt6878/tetris_modem_layout.o \
             board/mediatek/mt6878/tetris_modem_bundle.o \
             board/mediatek/mt6878/tetris_modem_storage.o \
@@ -161,6 +169,7 @@ jobs:
             board/mediatek/mt6878/tetris_modem_load.o \
             board/mediatek/mt6878/tetris_modem_bootstrap.o \
             board/mediatek/mt6878/tetris_modem_boot_secure.o \
+            board/mediatek/mt6878/tetris_modem_loaded_boot.o \
             board/mediatek/mt6878/tetris_modem_emi_rows.o \
             board/mediatek/mt6878/tetris_modem_emi_rows_program.o \
             board/mediatek/mt6878/tetris_modem_emi.o \
@@ -183,6 +192,7 @@ jobs:
           SCP_TCM: ${{ inputs.scp_tcm || false }}
           SCP_SECURE: ${{ inputs.scp_secure || false }}
           GPUEB_TRANSFORM: ${{ inputs.gpueb_transform || false }}
+          GPUEB_FLAT_RETENTION: ${{ inputs.gpueb_flat_retention || false }}
         run: |
           . .venv/bin/activate
           make mt6878_tetris_defconfig
@@ -222,10 +232,17 @@ jobs:
             grep -qx 'CONFIG_TETRIS_SCP_SECURE_DIAGNOSTIC=y' .config
           fi
           if [ "$GPUEB_TRANSFORM" = true ]; then
+            test "$GPUEB_FLAT_RETENTION" = false
             test "$SCP_SECURE" = true
             scripts/config --enable TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC
             make olddefconfig
             grep -qx 'CONFIG_TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC=y' .config
+          fi
+          if [ "$GPUEB_FLAT_RETENTION" = true ]; then
+            test "$SCP_SECURE" = true
+            scripts/config --enable TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC
+            make olddefconfig
+            grep -qx 'CONFIG_TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC=y' .config
           fi
 
       - name: Test bounded LK CCCI handoff observation
@@ -561,6 +578,11 @@ jobs:
       - name: Write artifact checksums
         run: |
           printf 'commit=%s\n' "$GITHUB_SHA" > BUILD-MANIFEST
+          if grep -qx 'CONFIG_TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC=y' .config; then
+            printf 'gpueb_flat_retention=slot-a-authenticated-private-no-start\n' >> BUILD-MANIFEST
+          else
+            printf 'gpueb_flat_retention=disabled\n' >> BUILD-MANIFEST
+          fi
           if grep -qx 'CONFIG_TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC=y' .config; then
             printf 'gpueb_transform=slot-a-verified-erased-no-boot\n' >> BUILD-MANIFEST
           else

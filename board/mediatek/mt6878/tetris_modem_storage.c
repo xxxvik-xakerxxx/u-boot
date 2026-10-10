@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <asm/cache.h>
 #include <linux/errno.h>
+#include <linux/string.h>
 #endif
 #include "tetris_modem_storage.h"
 #include "tetris_scp_security.h"
@@ -377,6 +378,91 @@ int tetris_modem_load_slot_b41(struct blk_desc *dev, char slot,
 	if (ret)
 		return ret;
 	*plan = loaded;
+	return 0;
+}
+
+int tetris_modem_load_slot_rows_b41(struct blk_desc *dev, char slot,
+		const unsigned char root_pin[32],
+		const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity, unsigned int ccb_gear,
+		const char *phy_gear, const unsigned char preloader_sha256[32],
+		const struct tetris_modem_emi_resources *resources,
+		struct tetris_modem_boot_plan *plan,
+		struct tetris_modem_emi_rows *rows)
+{
+	const struct tetris_modem_cache_ops cache = { .flush = flush_payload };
+	struct staging_allocation allocation = { 0 };
+	struct tetris_modem_storage storage;
+	struct tetris_modem_prepared_bundle prepared;
+	struct tetris_modem_boot_plan loaded;
+	struct tetris_modem_emi_rows produced;
+	const unsigned char *source;
+	void *buffer = NULL;
+	size_t bytes, used;
+	int ret, release_ret;
+
+	if (!root_pin || !ops || !ops->sha256 || !ops->verify ||
+	    !resources || !preloader_sha256 || !plan || !rows ||
+	    resources->firmware.capacity != capacity ||
+	    map_to_sysmem(destination) != resources->firmware.base ||
+	    !separate(destination, capacity, plan, sizeof(*plan)) ||
+	    !separate(destination, capacity, rows, sizeof(*rows)) ||
+	    !separate(plan, sizeof(*plan), rows, sizeof(*rows)) ||
+	    (((unsigned long)destination | capacity) & (ARCH_DMA_MINALIGN - 1)))
+		return -EINVAL;
+	ret = slot_storage(dev, slot, &storage);
+	if (ret)
+		return ret;
+	ret = snapshot_size(&storage, &bytes);
+	if (ret)
+		return ret;
+	ret = acquire_staging(&allocation, bytes, &buffer);
+	if (ret)
+		return ret;
+	/* Storage DMA cannot alias destination or either published output. */
+	if (!separate(buffer, bytes, destination, capacity) ||
+	    !separate(buffer, bytes, plan, sizeof(*plan)) ||
+	    !separate(buffer, bytes, rows, sizeof(*rows))) {
+		ret = -EINVAL;
+		goto release;
+	}
+	ret = read_snapshot(&storage, buffer, bytes, &used);
+	if (ret)
+		goto release;
+	/* The real manufacturer-root verifier runs once. No placed-RAM reauth. */
+	ret = tetris_modem_prepare_bundle_b41(buffer, used, root_pin, ops,
+		capacity, ccb_gear, &prepared);
+	if (ret)
+		goto release;
+	source = buffer;
+	ret = tetris_modem_emi_rows_b41(
+		source + prepared.bundle.members[0].payload_offset,
+		prepared.bundle.layout.rom_size, prepared.bundle.layout.dsp_size,
+		resources, ccb_gear, phy_gear, preloader_sha256, &produced);
+	if (ret)
+		goto release;
+	loaded.layout = prepared.bundle.layout;
+	loaded.smem_inputs = prepared.smem_inputs;
+	loaded.smem = prepared.smem;
+	memcpy(destination, source + prepared.bundle.members[0].payload_offset,
+		loaded.layout.rom_size);
+	memcpy((unsigned char *)destination + loaded.layout.dsp_offset,
+		source + prepared.bundle.members[2].payload_offset, loaded.layout.dsp_size);
+release:
+	/* Release exactly once. Primary read/auth/producer error wins. No EMI
+	 * programming or power transition is allowed inside this lifetime.
+	 */
+	release_ret = release_staging(&allocation, buffer, bytes);
+	if (ret)
+		return ret;
+	if (release_ret)
+		return release_ret;
+	ret = tetris_modem_sync_payloads(destination, capacity, &loaded.layout,
+		ARCH_DMA_MINALIGN, &cache);
+	if (ret)
+		return ret;
+	*plan = loaded;
+	*rows = produced;
 	return 0;
 }
 #endif

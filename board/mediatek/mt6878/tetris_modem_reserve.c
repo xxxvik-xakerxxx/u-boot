@@ -240,4 +240,27 @@ int tetris_modem_reserve_services(void *fdt, unsigned long long capacity,
 		*base = allocation.base;
 	return ret;
 }
+
+int tetris_modem_reserve_boot_bank(void *fdt, unsigned int role,
+		unsigned long long capacity, unsigned long long *base)
+{
+	static const char *const names[] = {
+		"tetris-modem-boot-nc", "tetris-modem-boot-cache", "tetris-modem-boot-sib",
+	};
+	struct window_allocation allocation = {
+		.capacity = capacity, .alignment = TETRIS_MODEM_ALIGN,
+	};
+	const struct tetris_modem_allocator ops = {
+		.alloc = allocate_window, .release = release_window, .ctx = &allocation,
+	};
+	int ret;
+
+	if (!base || role > 2 || !capacity || capacity > TETRIS_MODEM_LIMIT ||
+	    (capacity & 0xffffULL) || (role < 2 && capacity != 0x8000000ULL))
+		return -EINVAL;
+	ret = reserve_region(fdt, &ops, names[role], capacity, TETRIS_MODEM_ALIGN);
+	if (!ret)
+		*base = allocation.base;
+	return ret;
+}
 #endif

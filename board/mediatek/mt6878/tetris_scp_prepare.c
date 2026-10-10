@@ -23,6 +23,7 @@
 #include "tetris_scp_tcm.h"
 #include "tetris_scp_secure.h"
 #include "tetris_gpueb_prepare.h"
+#include "tetris_gpueb_flat_hook.h"
 
 #define PROFILE_CONTAINER_SIZE 0xa43070U
 #define PROFILE_ATF_SIZE 900240U
@@ -606,6 +607,15 @@ int tetris_scp_prepare_diagnostic(struct bootm_headers *images, void *fdt)
 			goto out;
 	}
 	stage = "plaintext-verified";
+#if CONFIG_IS_ENABLED(TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC)
+	/* Preserve SCP stage/error/handoff; late GPU publication checks capture. */
+	{
+		int capture = tetris_gpueb_flat_capture_slot_a(dev, &crypto,
+			&tetris_scp_security_hw_ops, root_pin);
+
+		printf("Tetris: GPUEB analysis capture error=%d (not started)\n", capture);
+	}
+#endif
 #if CONFIG_IS_ENABLED(TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC)
 	/* Optional failure must not discard the already authenticated SCP images. */
 	gpueb_transform_diagnostic(dev, fdt, &crypto);

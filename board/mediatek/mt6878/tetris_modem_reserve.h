@@ -19,5 +19,10 @@ int tetris_modem_reserve_diagnostic(void *fdt);
 int tetris_modem_reserve_diagnostic_window(void *fdt, unsigned long long *base);
 int tetris_modem_reserve_services(void *fdt, unsigned long long capacity,
 				 unsigned long long *base);
+/* Internal boot owner: role0=NC, role1=cache, role2=PHY SIB. */
+int tetris_modem_reserve_boot_bank(void *fdt, unsigned int role,
+		unsigned long long capacity, unsigned long long *base);
+
+
 int tetris_modem_load_diagnostic(void *fdt);
 #endif

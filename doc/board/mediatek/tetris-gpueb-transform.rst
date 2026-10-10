@@ -53,6 +53,26 @@ span is forbidden.
 
 CI runs signature/framing/alias/failure fixtures, sanitizer segment tests and
 AArch64 object compilation, rebuilding every caller with the new report layout.
-Those are not hardware evidence. The next gate is one controlled transform-only
-boot with exact artifact hashes, USB/SSH and sensor regressions checked before
-and after. The diagnostic does not authorize a GPUEB boot or GPU power test.
+Those are not hardware evidence. Installed ``d385921`` completed a cold
+transform-only boot on r179: authenticated 156064 bytes, unknown flat format,
+SHA256 ``9628a446c2453664eebb7ce0f5b6d9db51d677d6c1db3c4ac1449f4cfaad86d7``.
+USB/SSH and automatic sensors survived; the user confirmed screen, touch,
+rotation and automatic brightness. No GPUEB startup or GPU power was tested.
+
+Private Flat Retention Candidate
+-------------------------------
+
+The separate default-off ``gpueb_flat_retention`` input is mutually exclusive
+with transform-and-erase. It authenticates and transforms once in the existing
+SCP crypto window, retains only the signed primary in an exclusive 1-MiB no-map
+reservation and publishes it into a separately reserved final Linux DT after
+overlays/fixups. Header memreserve and reserved-memory overlaps are rejected.
+The rest of the arena is erased, not filled with guessed executable bytes.
+
+The paired Linux analysis consumer is not yet installed or validated by module
+link/modpost. It exposes only a digest-checked signed snapshot to root for
+private RISC-V inspection. No plaintext belongs in public CI artifacts. The
+larger unauthenticated LK copy tail, entry/data/BSS and secure reset/power
+ownership remain unresolved. This candidate starts no GPUEB or GPU and has not
+been flashed. Native faults, actual ARM64 objects and a full opt-in link are
+required before one controlled private-analysis boot.

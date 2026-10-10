@@ -4,6 +4,7 @@ obj-y	+= mt6878_tetris.o
 obj-$(CONFIG_TETRIS_MODEM_RESERVE_DIAGNOSTIC) += tetris_modem_reserve.o
 obj-$(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC) += tetris_modem_load.o
 obj-$(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC) += tetris_modem_bootstrap.o tetris_modem_boot_secure.o
+obj-$(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC) += tetris_modem_loaded_boot.o
 obj-$(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC) += tetris_modem_emi_rows.o tetris_modem_emi_rows_program.o
 obj-$(CONFIG_TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC) += tetris_modem_observe.o
 obj-$(CONFIG_TETRIS_SCP_HANDOFF_INVENTORY) += tetris_scp_handoff.o
@@ -19,6 +20,9 @@ obj-$(CONFIG_TETRIS_SCP_SECURITY) += tetris_modem_remap.o
 obj-$(CONFIG_TETRIS_SCP_SECURITY) += tetris_modem_emi.o
 obj-$(CONFIG_TETRIS_SCP_SECURITY) += tetris_gpueb_layout.o tetris_gpueb_prepare.o
 obj-$(CONFIG_TETRIS_SCP_SECURITY) += tetris_gpueb_segments.o
+obj-$(CONFIG_TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC) += tetris_gpueb_flat.o
+obj-$(CONFIG_TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC) += tetris_gpueb_flat_publish.o
+obj-$(CONFIG_TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC) += tetris_gpueb_flat_hook.o
 $(obj)/tetris_scp_security.o: $(obj)/tetris_scp_fields.asn1.h
 $(obj)/tetris_scp_fields.asn1.o: $(obj)/tetris_scp_fields.asn1.c $(obj)/tetris_scp_fields.asn1.h
 ccflags-$(CONFIG_TETRIS_SCP_SECURITY) += -I$(obj)
