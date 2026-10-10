@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0+
 #include <blk.h>
 #include <bootm.h>
+#include <cpu_func.h>
 #include <lmb.h>
 #include <malloc.h>
 #include <mapmem.h>
@@ -77,7 +78,7 @@ int tetris_gpueb_flat_publish_final(struct bootm_headers *images)
 		return capture_error;
 	if (!pending || !images || !images->ft_addr || !images->ft_len)
 		return -EINVAL;
-	old = map_sysmem(images->ft_addr, images->ft_len);
+	old = images->ft_addr;
 	ret = fdt_check_full(old, images->ft_len);
 	if (ret)
 		goto discard;
@@ -105,18 +106,16 @@ int tetris_gpueb_flat_publish_final(struct bootm_headers *images)
 	/* New final DT contains its own header reservation and no-map payload.
 	 * Keep old DT allocation too; do not risk freeing a shared boot buffer.
 	 */
-	flush_dcache_range(address, address + capacity);
-	images->ft_addr = address;
+	flush_dcache_range((unsigned long)final, (unsigned long)final + capacity);
+	images->ft_addr = final;
 	images->ft_len = fdt_totalsize(final);
-	unmap_sysmem(final);
-	unmap_sysmem(old);
+	/* bootm retains this mapping through Linux handoff; old is borrowed. */
 	return 0;
 release:
 	if (final)
 		unmap_sysmem(final);
 	lmb_free(address, capacity, LMB_NOOVERWRITE | LMB_NONOTIFY);
 discard:
-	unmap_sysmem(old);
 	if (pending && !tetris_gpueb_flat_discard(pending))
 		pending = NULL;
 	return ret;
