@@ -32,6 +32,20 @@ Separate `/chosen` properties are single big-endian u32 cells:
   This does not prove firmware load or hardware access occurred.
 - `nothing,modem-brom-publication-error`: signed report-publication error,
   independent of the first operational error.
+- `nothing,modem-brom-loaded-observation-valid`: 1 only when the loaded-owner
+  report was fetched successfully; not a readiness or hardware-permission bit.
+- `nothing,modem-brom-loaded-value`: the loaded owner's already sampled u32
+  register value, zero when its report could not be fetched.
+
+`nothing,modem-brom-loaded-address` is one big-endian u64 cell containing the
+loaded owner's corresponding address, zero when its report could not be
+fetched. These fields preserve the original v1 hardware-stage value/address:
+the early cold-OFF checker runs before bootstrap and records a different
+sample. They add no MMIO reads, reset, retry, or permission changes. Validity
+means report availability only; interpret the address/value with loaded stage
+and error. Before register sampling, a successfully fetched report can still
+contain zero address/value. All three placeholders precede loader entry;
+publication failures retain the first operational error.
 
 Absent modem-compatible nodes retain the original disabled-by-absence policy;
 presence is not required and absence does not grant hardware permission.
@@ -113,4 +127,24 @@ No boot attribute, partition, authentication or permission policy is changed.
 
 The CI fixture extracts the actual UFS identity function and mocks only its
 read-query boundary; it includes the observed HPB user-LU tuple plus strict
-error/output-lifetime cases. A later cold readback is still required.
+error/output-lifetime cases.
+
+## 7012ed17 first cold readback
+
+CI 38068197075 passed all native/ARM image gates. The 3,306,064-byte image
+SHA256 `b960a5973befb0964df8afe9b853a684045e50879b911c21b6a3810eaf6139ec`
+was installed only in `lk_a`. After full power-off and physical power-on,
+`u-boot,version` and the installed prefix hash match `7012ed17a238`.
+The first report now has result `-16` (`-EBUSY`), report-fetch 0, loaded stage
+2 (`TETRIS_MD_LOAD_OFF`), loaded error `-EBUSY`, board stage 15 and publication
+error 0. Storage/profile selection passed and the loaded owner was entered.
+Bootstrap/hardware fields remain zero: the cold-OFF check refused before
+firmware reservation, authentication/copy or SMEM writes.
+
+The v1 record does not include the loaded owner's already sampled failing
+register address/value. The independent fields above close this reporting
+gap without changing that check or rereading registers from Linux. A new CI
+image and cold readback are required to identify which source-backed OFF
+condition failed. Do not remove the guard, infer OFF from hardware zeros, or
+retry the modem on this boot. USB, SCP and the 24-entry/mask-31 sensor inventory
+remain active; the kernel journal and first report were preserved.

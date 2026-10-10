@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class BoardReportTests(unittest.TestCase):
     def test_report_precedes_hardware(self):
         source = (ROOT / 'board/mediatek/mt6878/tetris_modem_brom_board.c').read_text()
-        self.assertLess(source.index('ret = publish(final, recorded, stage, 0, 0, 0)'),
+        self.assertLess(source.index('ret = publish(final, recorded, stage, 0, 0, 0, NULL)'),
                         source.index('ret = tetris_modem_linux_b41_once('))
         self.assertLess(source.index('images->ft_addr = final;'),
                         source.index('ret = tetris_modem_linux_b41_once('))
@@ -18,6 +18,16 @@ class BoardReportTests(unittest.TestCase):
         self.assertNotIn('-ENODEV', disabled)
         self.assertIn('unsigned char recorded[80]', source)
         self.assertIn('put32(recorded, 1)', source)
+
+    def test_loaded_observation_preserves_v1_hardware_fields(self):
+        source = (ROOT / 'board/mediatek/mt6878/tetris_modem_brom_board.c').read_text()
+        for field in ('loaded-observation-valid', 'loaded-value', 'loaded-address'):
+            self.assertIn('nothing,modem-brom-' + field, source)
+        self.assertIn('report_ret ? NULL : &report', source)
+        self.assertIn('cpu_to_fdt64(loaded ? loaded->address : 0)', source)
+        self.assertIn('put32(recorded + 36, report.hardware.value)', source)
+        self.assertIn('put64(recorded + 40, report.hardware.address)', source)
+        self.assertNotIn('readl(', source)
 
     def test_error_order_and_owned_lifetime(self):
         source = (ROOT / 'board/mediatek/mt6878/tetris_modem_brom_board.c').read_text()

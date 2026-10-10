@@ -11,7 +11,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/tetris-brom-board.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 cd "$root"
 cc=${HOSTCC:-cc}
-flags='-std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer'
+flags='-std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer'
 # Existing upstream libfdt parameter warnings are isolated from our TU.
 for source in fdt fdt_addresses fdt_empty_tree fdt_ro fdt_rw fdt_strerror fdt_sw fdt_wip; do
     "$cc" $flags -Wno-unused-parameter -Iscripts/dtc/libfdt \

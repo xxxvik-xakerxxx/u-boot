@@ -70,7 +70,8 @@ static int disabled(const void *fdt, const char *compatible)
  * Try every field even if another fails, preserving the first publication error.
  */
 static int publish(void *fdt, const unsigned char recorded[80], unsigned int stage,
-		   unsigned int status, unsigned int entered, int publication_error)
+		   unsigned int status, unsigned int entered, int publication_error,
+		   const struct tetris_modem_loaded_report *loaded)
 {
 	const char *names[] = {
 		"nothing,modem-brom-preflight-stage",
@@ -78,9 +79,13 @@ static int publish(void *fdt, const unsigned char recorded[80], unsigned int sta
 		"nothing,modem-brom-preflight-error",
 		"nothing,modem-brom-loader-entered",
 		"nothing,modem-brom-publication-error",
+		"nothing,modem-brom-loaded-observation-valid",
+		"nothing,modem-brom-loaded-value",
 	};
 	unsigned int values[] = { stage, status, (unsigned int)first_error, entered,
-				  (unsigned int)publication_error };
+				  (unsigned int)publication_error, loaded != NULL,
+				  loaded ? loaded->value : 0 };
+	fdt64_t loaded_address = cpu_to_fdt64(loaded ? loaded->address : 0);
 	unsigned int i;
 	int chosen, ret, error = 0;
 
@@ -98,6 +103,12 @@ static int publish(void *fdt, const unsigned char recorded[80], unsigned int sta
 		if (ret && !error)
 			error = ret;
 	}
+	chosen = fdt_path_offset(fdt, "/chosen");
+	ret = chosen < 0 ? chosen : fdt_setprop(fdt, chosen,
+		"nothing,modem-brom-loaded-address", &loaded_address,
+		sizeof(loaded_address));
+	if (ret && !error)
+		error = ret;
 	return error;
 }
 
@@ -161,7 +172,7 @@ int tetris_modem_brom_only_board(struct bootm_headers *images)
 	if (ret)
 		goto fail;
 	stage = BROM_PLACEHOLDER;
-	ret = publish(final, recorded, stage, 0, 0, 0);
+	ret = publish(final, recorded, stage, 0, 0, 0, NULL);
 	if (ret) {
 		publication_error = ret;
 		goto fail;
@@ -202,7 +213,7 @@ int tetris_modem_brom_only_board(struct bootm_headers *images)
 	if (ret < 0)
 		goto fail;
 	stage = BROM_POLICY;
-	ret = publish(final, recorded, stage, 0, 1, 0);
+	ret = publish(final, recorded, stage, 0, 1, 0, NULL);
 	if (ret) {
 		publication_error = ret;
 		goto fail;
@@ -223,6 +234,8 @@ int tetris_modem_brom_only_board(struct bootm_headers *images)
 		printf("Tetris MD reply=%llx/%llx/%llx/%llx\n",
 			report.hardware.reply[0], report.hardware.reply[1],
 			report.hardware.reply[2], report.hardware.reply[3]);
+		printf("Tetris MD loaded observation address=%lx value=%x\n",
+			report.address, report.value);
 	}
 	/* Observation-only LE record, explicitly NOT a kernel CCCI descriptor.
 	 * Recover node offset after the loader's transactional DT reservations.
@@ -260,7 +273,8 @@ fail:
 			put32(recorded + 8, (unsigned int)-EINPROGRESS);
 		}
 		publish_ret = publish(target, recorded, stage, first_error ? 2 : 1,
-				      entered, publication_error);
+				      entered, publication_error,
+				      report_ret ? NULL : &report);
 		if (publish_ret) {
 			if (!publication_error)
 				publication_error = publish_ret;
@@ -268,7 +282,8 @@ fail:
 			/* A second observation-only update may expose the publication error;
 			 * it must not overwrite the first operational error or run hardware.
 			 */
-			publish(target, recorded, stage, 2, entered, publication_error);
+			publish(target, recorded, stage, 2, entered, publication_error,
+				report_ret ? NULL : &report);
 			printf("Tetris MD report publication error=%d first=%d\n",
 			       publish_ret, first_error);
 		}
