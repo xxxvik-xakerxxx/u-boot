@@ -65,7 +65,7 @@ static int cold_off(void)
 	static const unsigned long addresses[] = {
 		0x1c001e00UL, 0x1c001f24UL, 0x10001c5cUL, 0x10001c4cUL, 0x1027008cUL,
 	};
-	static const unsigned int masks[] = { 4U | (3U << 30), 3, 0x200, 0x800, 0xc0 };
+	static const unsigned int masks[] = { 4U | TETRIS_MD_POWER_ACK, 3, 0x200, 0x800, 0xc0 };
 	static const unsigned int expected[] = { 0, 3, 0x200, 0x800, 0xc0 };
 	unsigned int i;
 

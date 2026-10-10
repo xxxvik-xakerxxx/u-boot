@@ -148,3 +148,28 @@ image and cold readback are required to identify which source-backed OFF
 condition failed. Do not remove the guard, infer OFF from hardware zeros, or
 retry the modem on this boot. USB, SCP and the 24-entry/mask-31 sensor inventory
 remain active; the kernel journal and first report were preserved.
+
+## MD-specific power acknowledgement
+
+Nothing's pinned vendor commit `ee2be53cb75670b548948636a0db1d1ff112bf12`,
+`drivers/soc/mediatek/mtk-scpsys-mt6878.c`, selects `MTK_SCPD_MD_OPS` and
+`MTK_SCPD_IS_PWR_CON_ON` for the MD domain at control offset `0xe00`.
+Its `mtk-scpsys.c:scpsys_md_power_on/off` both poll
+`scpsys_pwr_ack_is_on`, which checks `PWR_ACK` (bit 30) alone. The separate
+second-ACK helper belongs to other domain sequences. The previously audited
+LK MD ON/OFF routines also poll ACK30 only.
+
+The loaded-owner OFF observation and bootstrap ON/OFF waits now share
+`TETRIS_MD_POWER_ACK`, bit 30. Requiring generic-domain ACK31 completion was
+an unsupported strengthening of this MD-specific contract. This correction
+does not admit inherited ON state: `PWR_ON` or ACK30 still returns `-EBUSY`
+before any firmware reservation/write. In particular the actual sample
+`0x4200000d` still refuses; ACK31 being clear is not independently proof of
+a stalled MD transition.
+
+`test_tetris_modem_power_ack.py` extracts the actual production OFF observers
+and read/poll helpers. Its CI-only native fixture covers ACK31 set/clear,
+each OFF refusal, actual handset refusal, ACK30 success and finite timeouts.
+Only read/timer and first-error-latch boundaries are mocked; no hardware
+mutation, inherited-state cleanup or end-to-end BROM success is established.
+The complete production ARM objects/image still require the normal CI gates.

@@ -5,6 +5,9 @@
 #include "tetris_modem_boot_secure.h"
 #include "tetris_modem_emi_rows.h"
 
+/* MT6878 MD_OPS uses ACK30, unlike the two-ACK generic power domains. */
+#define TETRIS_MD_POWER_ACK (1U << 30)
+
 /* Pointer-free source-derived rows cached BEFORE authenticated snapshot release.
  * Cache-clean placed images and initialized service banks belong to the loader
  * owner. No API accepting mutable placed RAM or caller readiness booleans.

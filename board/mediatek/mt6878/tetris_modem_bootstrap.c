@@ -22,7 +22,7 @@
 #define MD_NEMI_SET 0x10270084UL
 #define MD_NEMI_STA 0x1027008cUL
 #define MD_ON 4U
-#define MD_ACK (3U << 30)
+#define MD_ACK TETRIS_MD_POWER_ACK
 #define MD_CLOCK 0x300U
 #define MD_POLL_US 10
 #define MD_POLL_COUNT 10000
