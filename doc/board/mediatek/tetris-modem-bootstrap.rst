@@ -25,9 +25,21 @@ stock input and 37 real-C sanitizer fault cases passed CI 37991128306 there.
 Fixtures substitute hardware/profile I/O; that is not a handset result.
 U-Boot CI additionally compiles these actual sources against real ARM64 headers.
 
+The separate ``tetris_modem_emi_rows_b41`` producer now derives all twelve rows
+from signed ROM metadata and actual firmware/NC/cache/SIB reservations. It
+handles optional PHY capture and the real slot40 padding fragment. Its secure
+transaction validates the existing policy, applies only the matching ATF preset,
+then verifies and programs the range once. Full reservations must not overlap;
+the unused firmware tail is not available to a second allocation.
+These sources match pmOS commit ``c4afd07``. The 20 native fault cases are being
+checked in CI 38025125760; ARM64 compilation is separate from hardware execution.
+
 Before any caller is enabled, the authenticated loader must produce all active
 EMI rows, initialize and cache-clean the reserved service banks, retain ownership
 through physical bootstrap and publish the complete existing CCCI handoff tags.
-Active slots39/40 currently fail before mutation; they must not be omitted or
-programmed with a guessed preset. The existing stored-ATF profile check is not
+The existing bootstrap still uses its older range API and rejects active
+slots39/40. Its EMI phase must be replaced by the typed transaction, not preceded
+by it: programming both would consume the same one-shot guards twice. NC/cache
+bank remaps and the real resource owner are not supplied by the row producer.
+The existing stored-ATF profile check is not
 runtime attestation and does not support arbitrary boot chains.

@@ -161,6 +161,8 @@ jobs:
             board/mediatek/mt6878/tetris_modem_load.o \
             board/mediatek/mt6878/tetris_modem_bootstrap.o \
             board/mediatek/mt6878/tetris_modem_boot_secure.o \
+            board/mediatek/mt6878/tetris_modem_emi_rows.o \
+            board/mediatek/mt6878/tetris_modem_emi_rows_program.o \
             board/mediatek/mt6878/tetris_modem_emi.o \
             board/mediatek/mt6878/tetris_modem_observe.o \
             board/mediatek/mt6878/tetris_scp_prepare.o \
