@@ -192,6 +192,21 @@ config TETRIS_MODEM_LOAD_DIAGNOSTIC
 	  SMCs, release reset, enable CCCI, publish ready tags or write storage.
 	  This is not SIM/calls support and is disabled in ordinary builds.
 
+config TETRIS_MODEM_BROM_ONLY
+	bool "Tetris one-attempt cold modem BROM-only experiment"
+	depends on TARGET_MT6878 && LMB && OF_LIBFDT && TETRIS_SCP_SECURITY
+	depends on !TETRIS_MODEM_LOAD_DIAGNOSTIC
+	depends on !TETRIS_MODEM_RESERVE_DIAGNOSTIC
+	depends on !TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC
+	depends on !TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC
+	default n
+	help
+	  Explicit diagnostic only. Validate slot A, the selected UFS boot-LUN
+	  GFH and stock ATF, then authenticate modem firmware before the finite
+	  EMI/remap/power/BROM sequence. Linux MD drivers remain disabled and
+	  no CCCI descriptor is published. Preserve the first error and RAM
+	  reservations for recovery; no retries or SIM readiness claim.
+
 config TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC
 	bool "Read pinned secure modem EMI state without programming it"
 	depends on TETRIS_MODEM_LOAD_DIAGNOSTIC && TETRIS_SCP_PREPARE_DIAGNOSTIC

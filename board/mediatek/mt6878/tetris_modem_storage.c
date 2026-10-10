@@ -381,14 +381,14 @@ int tetris_modem_load_slot_b41(struct blk_desc *dev, char slot,
 	return 0;
 }
 
-int tetris_modem_load_slot_rows_b41(struct blk_desc *dev, char slot,
+static int load_slot_owned(struct blk_desc *dev, char slot,
 		const unsigned char root_pin[32],
 		const struct tetris_scp_security_ops *ops,
 		void *destination, size_t capacity, unsigned int ccb_gear,
 		const char *phy_gear, const unsigned char preloader_sha256[32],
 		const struct tetris_modem_emi_resources *resources,
 		struct tetris_modem_boot_plan *plan,
-		struct tetris_modem_emi_rows *rows)
+		struct tetris_modem_emi_rows *rows, unsigned char *check_header)
 {
 	const struct tetris_modem_cache_ops cache = { .flush = flush_payload };
 	struct staging_allocation allocation = { 0 };
@@ -396,6 +396,7 @@ int tetris_modem_load_slot_rows_b41(struct blk_desc *dev, char slot,
 	struct tetris_modem_prepared_bundle prepared;
 	struct tetris_modem_boot_plan loaded;
 	struct tetris_modem_emi_rows produced;
+	unsigned char footer[512];
 	const unsigned char *source;
 	void *buffer = NULL;
 	size_t bytes, used;
@@ -408,6 +409,10 @@ int tetris_modem_load_slot_rows_b41(struct blk_desc *dev, char slot,
 	    !separate(destination, capacity, plan, sizeof(*plan)) ||
 	    !separate(destination, capacity, rows, sizeof(*rows)) ||
 	    !separate(plan, sizeof(*plan), rows, sizeof(*rows)) ||
+	    (check_header &&
+	     (!separate(destination, capacity, check_header, 512) ||
+	      !separate(plan, sizeof(*plan), check_header, 512) ||
+	      !separate(rows, sizeof(*rows), check_header, 512))) ||
 	    (((unsigned long)destination | capacity) & (ARCH_DMA_MINALIGN - 1)))
 		return -EINVAL;
 	ret = slot_storage(dev, slot, &storage);
@@ -422,7 +427,8 @@ int tetris_modem_load_slot_rows_b41(struct blk_desc *dev, char slot,
 	/* Storage DMA cannot alias destination or either published output. */
 	if (!separate(buffer, bytes, destination, capacity) ||
 	    !separate(buffer, bytes, plan, sizeof(*plan)) ||
-	    !separate(buffer, bytes, rows, sizeof(*rows))) {
+	    !separate(buffer, bytes, rows, sizeof(*rows)) ||
+	    (check_header && !separate(buffer, bytes, check_header, 512))) {
 		ret = -EINVAL;
 		goto release;
 	}
@@ -441,6 +447,9 @@ int tetris_modem_load_slot_rows_b41(struct blk_desc *dev, char slot,
 		resources, ccb_gear, phy_gear, preloader_sha256, &produced);
 	if (ret)
 		goto release;
+	if (check_header)
+		memcpy(footer, source + prepared.bundle.members[0].payload_offset +
+			prepared.bundle.layout.rom_size - 512, 512);
 	loaded.layout = prepared.bundle.layout;
 	loaded.smem_inputs = prepared.smem_inputs;
 	loaded.smem = prepared.smem;
@@ -463,6 +472,33 @@ release:
 		return ret;
 	*plan = loaded;
 	*rows = produced;
+	if (check_header)
+		memcpy(check_header, footer, 512);
 	return 0;
+}
+
+int tetris_modem_load_slot_rows_b41(struct blk_desc *dev, char slot,
+		const unsigned char root_pin[32], const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity, unsigned int ccb_gear,
+		const char *phy_gear, const unsigned char preloader_sha256[32],
+		const struct tetris_modem_emi_resources *resources,
+		struct tetris_modem_boot_plan *plan, struct tetris_modem_emi_rows *rows)
+{
+	return load_slot_owned(dev, slot, root_pin, ops, destination, capacity,
+		ccb_gear, phy_gear, preloader_sha256, resources, plan, rows, NULL);
+}
+
+int tetris_modem_load_slot_handoff_b41(struct blk_desc *dev, char slot,
+		const unsigned char root_pin[32], const struct tetris_scp_security_ops *ops,
+		void *destination, size_t capacity, unsigned int ccb_gear,
+		const char *phy_gear, const unsigned char preloader_sha256[32],
+		const struct tetris_modem_emi_resources *resources,
+		struct tetris_modem_boot_plan *plan, struct tetris_modem_emi_rows *rows,
+		unsigned char check_header[512])
+{
+	if (!check_header)
+		return -EINVAL;
+	return load_slot_owned(dev, slot, root_pin, ops, destination, capacity,
+		ccb_gear, phy_gear, preloader_sha256, resources, plan, rows, check_header);
 }
 #endif

@@ -38,6 +38,7 @@ static u64 tetris_test_get_le64(const void *ptr)
 #else
 #include <config.h>
 #include <bootm.h>
+#include "tetris_modem_final.h"
 #include <blk.h>
 #include <command.h>
 #include <dm/uclass-id.h>
@@ -1766,6 +1767,14 @@ void board_prep_linux(struct bootm_headers *images)
 	ret = tetris_prepare_connsys_emi(fdt);
 	if (ret)
 		panic("Tetris: refusing Linux boot without conninfra EMI mapping\n");
+	if (IS_ENABLED(CONFIG_TETRIS_MODEM_BROM_ONLY)) {
+		ret = tetris_modem_brom_only_board(images);
+		printf("Tetris MD BROM-only first result: %d\n", ret);
+		/* The diagnostic may have replaced DT and added reservations even on
+		 * hardware failure. Never revert it or reuse the borrowed old pointer.
+		 */
+		fdt = images->ft_addr;
+	}
 	if (IS_ENABLED(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC)) {
 		ret = tetris_modem_load_diagnostic(fdt);
 		printf("Tetris modem RAM load diagnostic: %d (modem not started)\n", ret);

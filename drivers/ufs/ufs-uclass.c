@@ -1523,6 +1523,45 @@ out:
 	return ret;
 }
 
+int ufs_read_lun_boot_identity(struct udevice *scsi, unsigned int lun,
+		unsigned int *enabled_boot, unsigned int *unit_boot)
+{
+	struct ufs_hba *hba;
+	u8 unit[255];
+	u32 enabled = 0;
+	int length, ret;
+
+	if (!scsi || !scsi->parent || !enabled_boot || !unit_boot || lun >= UFS_MAX_LUNS ||
+	    device_get_uclass_id(scsi) != UCLASS_SCSI ||
+	    device_get_uclass_id(scsi->parent) != UCLASS_UFS)
+		return -EINVAL;
+	hba = dev_get_uclass_priv(scsi->parent);
+	if (!hba)
+		return -EINVAL;
+	ret = ufshcd_query_attr(hba, UPIU_QUERY_OPCODE_READ_ATTR,
+		QUERY_ATTR_IDN_BOOT_LU_EN, 0, 0, &enabled);
+	if (ret)
+		return ret;
+	if (enabled != 1 && enabled != 2)
+		return -EPROTONOSUPPORT;
+	ret = ufshcd_map_desc_id_to_length(hba, QUERY_DESC_IDN_UNIT, &length);
+	if (ret)
+		return ret;
+	if (length < 5 || length > (int)sizeof(unit))
+		return -EPROTO;
+	ret = __ufshcd_query_descriptor(hba, UPIU_QUERY_OPCODE_READ_DESC,
+		QUERY_DESC_IDN_UNIT, lun, 0, unit, &length);
+	if (ret)
+		return ret;
+	/* UFS unit descriptor: length/type/index/enable/boot-ID at0..4. */
+	if (length < 5 || unit[0] < 5 || unit[0] > length ||
+	    unit[1] != QUERY_DESC_IDN_UNIT || unit[2] != lun || unit[3] != 1 || unit[4] > 2)
+		return -EPROTO;
+	*enabled_boot = enabled;
+	*unit_boot = unit[4];
+	return 0;
+}
+
 /* replace non-printable or non-ASCII characters with spaces */
 static inline void ufshcd_remove_non_printable(uint8_t *val)
 {

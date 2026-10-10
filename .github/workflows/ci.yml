@@ -22,6 +22,11 @@ on:
         required: false
         type: boolean
         default: false
+      modem_brom_only:
+        description: 'One cold authenticated modem BROM attempt; Linux CCCI stays disabled'
+        required: false
+        type: boolean
+        default: false
       scp_prepare:
         description: 'Enable audited slot-A SCP decryption experiment (no TCM/reset)'
         required: false
@@ -170,6 +175,11 @@ jobs:
             board/mediatek/mt6878/tetris_modem_bootstrap.o \
             board/mediatek/mt6878/tetris_modem_boot_secure.o \
             board/mediatek/mt6878/tetris_modem_loaded_boot.o \
+            board/mediatek/mt6878/tetris_modem_ccci_tags.o \
+            board/mediatek/mt6878/tetris_modem_linux_policy.o \
+            board/mediatek/mt6878/tetris_modem_final.o \
+            board/mediatek/mt6878/tetris_modem_brom_board.o \
+            drivers/ufs/ufs-uclass.o \
             board/mediatek/mt6878/tetris_modem_emi_rows.o \
             board/mediatek/mt6878/tetris_modem_emi_rows_program.o \
             board/mediatek/mt6878/tetris_modem_emi.o \
@@ -189,6 +199,7 @@ jobs:
           MODEM_RESERVE: ${{ inputs.modem_reserve || false }}
           MODEM_LOAD: ${{ inputs.modem_load || false }}
           MODEM_EMI_OBSERVE: ${{ inputs.modem_emi_observe || false }}
+          MODEM_BROM_ONLY: ${{ inputs.modem_brom_only || false }}
           SCP_TCM: ${{ inputs.scp_tcm || false }}
           SCP_SECURE: ${{ inputs.scp_secure || false }}
           GPUEB_TRANSFORM: ${{ inputs.gpueb_transform || false }}
@@ -230,6 +241,17 @@ jobs:
             scripts/config --enable TETRIS_SCP_SECURE_DIAGNOSTIC
             make olddefconfig
             grep -qx 'CONFIG_TETRIS_SCP_SECURE_DIAGNOSTIC=y' .config
+          fi
+          if [ "$MODEM_BROM_ONLY" = true ]; then
+            test "$MODEM_RESERVE" = false
+            test "$MODEM_LOAD" = false
+            test "$MODEM_EMI_OBSERVE" = false
+            test "$GPUEB_TRANSFORM" = false
+            test "$GPUEB_FLAT_RETENTION" = false
+            test "$SCP_SECURE" = true
+            scripts/config --enable TETRIS_MODEM_BROM_ONLY
+            make olddefconfig
+            grep -qx 'CONFIG_TETRIS_MODEM_BROM_ONLY=y' .config
           fi
           if [ "$GPUEB_TRANSFORM" = true ]; then
             test "$GPUEB_FLAT_RETENTION" = false
@@ -578,6 +600,11 @@ jobs:
       - name: Write artifact checksums
         run: |
           printf 'commit=%s\n' "$GITHUB_SHA" > BUILD-MANIFEST
+          if grep -qx 'CONFIG_TETRIS_MODEM_BROM_ONLY=y' .config; then
+            printf 'modem_brom_only=cold-one-attempt-no-ccci-descriptor\n' >> BUILD-MANIFEST
+          else
+            printf 'modem_brom_only=disabled\n' >> BUILD-MANIFEST
+          fi
           if grep -qx 'CONFIG_TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC=y' .config; then
             printf 'gpueb_flat_retention=slot-a-authenticated-private-no-start\n' >> BUILD-MANIFEST
           else

@@ -9,6 +9,8 @@
 #include <linux/errno.h>
 #include <linux/string.h>
 #include "tetris_modem_loaded_boot.h"
+#include "tetris_modem_ccci_tags.h"
+#include "tetris_modem_final.h"
 #include "tetris_modem_storage.h"
 #include "tetris_modem_reserve.h"
 #include "tetris_scp_security.h"
@@ -25,6 +27,8 @@ static const unsigned char root_pin[32] = {
 static struct {
 	unsigned int attempted;
 	struct tetris_modem_loaded_report report;
+	struct tetris_modem_boot_plan loaded;
+	unsigned char check_header[512];
 } owner;
 
 static int fail(int ret)
@@ -121,7 +125,7 @@ int tetris_modem_loaded_boot_once(void *fdt, struct blk_desc *dev, char slot,
 	struct tetris_modem_bootstrap_plan *boot = &owner.report.bootstrap;
 	struct tetris_modem_emi_resources *r = &boot->resources;
 	const struct tetris_modem_cache_ops cache = { .flush = synchronize };
-	struct tetris_modem_boot_plan loaded;
+	struct tetris_modem_boot_plan *loaded = &owner.loaded;
 	unsigned long long policy[8];
 	unsigned char *firmware = NULL, *nc = NULL, *cached = NULL;
 	int ret;
@@ -180,13 +184,14 @@ int tetris_modem_loaded_boot_once(void *fdt, struct blk_desc *dev, char slot,
 		goto out;
 	}
 	owner.report.stage = TETRIS_MD_LOAD_AUTH_COPY;
-	ret = tetris_modem_load_slot_rows_b41(dev, slot, root_pin,
+	ret = tetris_modem_load_slot_handoff_b41(dev, slot, root_pin,
 		&tetris_scp_security_hw_ops, firmware, r->firmware.capacity, ccb_gear,
-		phy_gear, boot->preloader_sha256, r, &loaded, &boot->rows);
+		phy_gear, boot->preloader_sha256, r, loaded, &boot->rows,
+		owner.check_header);
 	if (ret)
 		goto out;
 	owner.report.stage = TETRIS_MD_LOAD_SERVICES;
-	ret = tetris_modem_initialize_smem_b41(&loaded, firmware, r->firmware.capacity,
+	ret = tetris_modem_initialize_smem_b41(loaded, firmware, r->firmware.capacity,
 		nc, r->nc.capacity, cached, r->cache.capacity, ARCH_DMA_MINALIGN, &cache);
 	if (ret)
 		goto out;
@@ -213,4 +218,15 @@ int tetris_modem_loaded_boot_report(struct tetris_modem_loaded_report *out)
 		return -EINVAL;
 	*out = owner.report;
 	return 0;
+}
+
+/* No arbitrary caller-supplied metadata/report can acquire publication. */
+int tetris_modem_loaded_encode_tags(void *buffer, size_t size)
+{
+	if (!owner.attempted || owner.report.stage != TETRIS_MD_LOAD_COMPLETE)
+		return -EAGAIN;
+	if (owner.report.error)
+		return owner.report.error;
+	return tetris_modem_build_linux_tags(&owner.loaded, owner.check_header,
+		&owner.report, buffer, size);
 }

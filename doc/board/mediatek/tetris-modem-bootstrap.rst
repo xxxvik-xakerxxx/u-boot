@@ -2,9 +2,9 @@ Tetris Modem Bootstrap Candidate
 ===============================
 
 This is source code for review and AArch64 compilation, not an enabled modem.
-No board hook invokes ``tetris_modem_bootstrap_once``. Adding its object under
+The ordinary build never invokes ``tetris_modem_bootstrap_once``. Adding its object under
 the existing default-off modem-load diagnostic does not change that diagnostic's
-RAM-only behavior. No new Kconfig permission, command or DT activation is added.
+RAM-only behavior. A separate default-off BROM-only profile is described below.
 
 The candidate validates the exact ATF profile, cold OFF state and every active
 EMI/remap input. It then uses the existing secure EMI/remap helpers, LK request8
@@ -44,10 +44,26 @@ cache-cleans services, then calls the actual bounded bootstrap. Only CPU
 mappings are dropped afterwards; final reservations remain owned on failure.
 The sources match pmOS commit ``9e2e01b``; signed input, 37 earlier bootstrap,
 20 EMI, 41 integrated-bootstrap and 17 allocation-owner sanitizer cases passed
-CI 38026075076. Actual ARM64 compilation of the new load owner remains pending.
+CI 38026075076. Actual ARM64 compilation and full image linking passed U-Boot
+CI 38027149560; neither result proves modem operation.
 
-No board hook invokes this owner. Before activation, actual boot-option and
-preloader identity producers, storage lifetime faults and complete CCCI handoff
-tags must be connected. Passing a caller-supplied hash is not runtime evidence.
+The default-off ``TETRIS_MODEM_BROM_ONLY`` profile connects the actual selected
+UFS boot-LUN descriptor, bounded GFH hash and explicit normal Linux policy to
+this owner. It refuses enabled Linux MD consumers, clones the current final DT
+before reservations and retains that clone on hardware failure. Its observation
+record contains the first load/hardware/cleanup error and four SMC reply words;
+it is not a CCCI descriptor or readiness claim. GPU experiments and the older
+modem diagnostics are mutually exclusive. No defconfig enables it.
+
+Storage authentication, copy, release and cache synchronization share one
+private implementation. Signed footer and loaded metadata remain private
+through BROM; the separate final CCCI publisher cannot accept an external
+success report. Its full 64-KiB tag mapping is reserved and cleaned before an
+atomic switch of the current final DT. That publisher has no board activation
+hook. Exact storage and tag ABI fixtures passed pmOS CI 38027600180; new
+final-publisher fixtures and actual BROM-profile ARM64/full-image CI remain
+pending. No new image has been flashed and no physical BROM success is claimed.
+
+Passing a caller-supplied hash is not runtime evidence.
 The existing stored-ATF profile check is not
 runtime attestation and does not support arbitrary boot chains.
