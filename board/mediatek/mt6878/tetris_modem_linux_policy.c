@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0+
+#ifndef TETRIS_MODEM_LINUX_POLICY_HOST_TEST
 #include <blk.h>
 #include <dm.h>
 #include <malloc.h>
@@ -11,6 +12,7 @@
 #include "tetris_modem_loaded_boot.h"
 #include "tetris_modem_linux_policy.h"
 #include "tetris_scp_handoff.h"
+#endif
 
 static unsigned int attempted;
 static int first_error;
@@ -58,14 +60,19 @@ static int selected_boot(struct blk_desc *user, struct blk_desc **out)
 	unsigned int seen = 0;
 	int ret;
 
-	if (!user || !user->bdev || !user->bdev->parent || user->uclass_id != UCLASS_SCSI)
+	if (!user || !out || !user->bdev || !user->bdev->parent ||
+	    user->uclass_id != UCLASS_SCSI ||
+	    device_get_uclass_id(user->bdev) != UCLASS_BLK ||
+	    dev_get_uclass_plat(user->bdev) != user)
 		return -EINVAL;
 	ret = blk_first_device(UCLASS_SCSI, &device);
 	while (!ret) {
-		struct blk_desc *candidate = blk_get_by_device(device);
+		/* The iterator returns the BLK child, not its storage parent. */
+		struct blk_desc *candidate = dev_get_uclass_plat(device);
 		unsigned int enabled, unit;
 
-		if (!candidate)
+		if (device_get_uclass_id(device) != UCLASS_BLK || !candidate ||
+		    candidate->bdev != device || candidate->uclass_id != UCLASS_SCSI)
 			return -EPROTO;
 		/* Only siblings of the actual modem partition's SCSI/UFS controller. */
 		if (device->parent == user->bdev->parent && candidate->target == user->target) {

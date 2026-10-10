@@ -70,3 +70,25 @@ v1 encoding, retained committed DT and no retries. Strict warnings and
 ASAN/UBSAN apply to our TU; unused-parameter relaxation is isolated to upstream
 libfdt objects. Parent CI must also compile the actual ARM board object.
 No physical startup or phone compatibility is established by these tests.
+
+## First 60cd handset readback
+
+The first readback of `60cd9ade5b99` on r179 records board stage 15, failed
+status 2, loader-entry marker 1, publication error 0, result `-71` (`-EPROTO`),
+and report-fetch `-22` (`-EINVAL`). All loaded/hardware fields are zero:
+the loaded owner was never entered. SCP preparation reports zero error and
+the sensor services remain active. This is not a modem BROM failure or READY.
+
+The policy selector mistakenly passed the BLK child returned by
+`blk_first_device` to `blk_get_by_device`, which searches that device's own
+children. Use the BLK child's `dev_get_uclass_plat` directly, validating its
+class and descriptor back-pointer. Continue selecting only the unique enabled
+boot LUN on the same SCSI parent/target as the modem partition. No fixed LUN,
+digest exception, authentication change, or hardware retry is introduced.
+
+`test_tetris_modem_linux_policy.py` checks the real iterator API; the CI-only
+`run_tetris_modem_linux_policy.sh` includes the actual production policy and
+exercises slot-1/slot-2 selection, unrelated controllers/targets, duplicates,
+missing owners and transport/descriptor failures under ASAN/UBSAN. The
+correction requires a new CI image and cold handset readback; source review
+alone does not establish physical modem startup.

@@ -111,6 +111,8 @@ jobs:
           sh .github/tests/run_tetris_modem_observe.sh
           python3 -B .github/tests/test_tetris_modem_brom_board.py
           sh .github/tests/run_tetris_modem_brom_board.sh
+          python3 -B .github/tests/test_tetris_modem_linux_policy.py
+          sh .github/tests/run_tetris_modem_linux_policy.sh
 
       - name: Test native SCP and modem certificate verifiers
         run: PYTHON=.venv/bin/python sh .github/tests/run_tetris_scp_security_c.sh
