@@ -377,8 +377,33 @@ on this unit. No guard reset, retry or permissive policy was introduced.
 
 USB/SSH recovered; the first report and full kernel journal are saved and no
 kernel Oops/BUG/SError/panic/WARNING was found. SCP retains the separate warm-
-TCM `-EBUSY` limitation, so sensors remain failed on this warm boot. A physical
-USB-disconnected cold startup is requested to restore them and check joint
-startup. The CCCI descriptor and Linux consumer are still disabled: this is
+TCM `-EBUSY` limitation, so sensors remain failed on this warm boot. The CCCI
+descriptor and Linux consumer are still disabled: this is
 NOT runtime READY, SIM detection, registration, calls, SMS, mobile data or
 confirmed model-wide support. Rootfs/NV/calibration and stock `lk_b` are untouched.
+
+## fdb0ee29 Joint Cold Startup
+
+On 2026-10-11 the user reported completion of the requested USB-disconnected
+power-off, ten-second wait and normal power-on. The first readback confirms
+`fdb0ee2994c6`, a new boot ID `afa7b585-30cb-40c3-83a9-7fbdc5a0569f` and
+220.97-second uptime. Loader/report-fetch errors are zero; loaded stage11 and
+hardware stage15 are COMPLETE, board stage16/status1, publication/cleanup
+errors zero. Final BROM x0=0 and x2=x3=`0x100000001` again satisfy all four
+source-defined flags. EMI ends at slot43, VERIFIED/step20, error zero.
+
+SCP preparation/error is zero, secure state3/error0; the sensor hub reports
+firmware-ready, 24 entries and physical mask31. Sensor, SensorProxy and SSH
+services are active, no system units are failed, and `usb0` is UP. Thus BROM
+completion and automatic sensor initialization coexist on this cold boot,
+without host-side driver loading or a modem retry. Visual display/touch,
+rotation and brightness checks for this particular boot remain pending.
+
+The complete kernel journal and first report were saved. No kernel
+Oops/BUG/SError/panic/WARNING was found; existing null SCP-resource diagnostics,
+an unchecked-filesystem mount warning and Wi-Fi/SCP notification timeouts remain.
+This is one cold repetition, not completed lifecycle/variant validation. Warm
+TCM recovery remains unresolved. Linux still has no CCCI runtime consumer,
+render node, video/media capture or GNSS device; BROM success is not SIM/calls,
+GPS fix, GPU acceleration or camera support. No partitions or runtime hardware
+state were changed during this readback.
