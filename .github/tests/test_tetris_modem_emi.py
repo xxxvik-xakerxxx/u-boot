@@ -162,11 +162,12 @@ class EmiTransactionTest(unittest.TestCase):
 
     def run_case(self, start=0x80000000, size=0x200000, slot=32,
                  base=0x80000000, capacity=0x20000000, state=0,
-                 corrupt=None, transport=None, missing=None, policy=None):
+                 corrupt=None, transport=None, missing=None, policy=None,
+                 end_marker=True):
         calls = []
         policy = list(policy) if policy is not None else [0x123456789abcdef0 ^ (i << 40) for i in range(8)]
         policy_array = (c.c_ulonglong * 8)(*policy)
-        values = [0] + policy + [0, start, (start + size) | (1 << 43), 1] + policy
+        values = [0] + policy + [0, start, (start + size) | ((1 << 43) if end_marker else 0), 1] + policy
 
         def smc(context, fid, operation, a, b, d, output):
             step = len(calls)
@@ -211,9 +212,35 @@ class EmiTransactionTest(unittest.TestCase):
             for bit in range(64):
                 with self.subTest(step=step, bit=bit):
                     ret, tx, calls = self.run_case(corrupt=(step, value ^ (1 << bit)))
+                    if step == 11 and bit == 43:
+                        self.assertEqual(ret, 0)
+                        self.assertEqual((tx.state, tx.step), (2, 20))
+                        self.assertEqual(len(calls), 21)
+                        continue
                     self.assertLess(ret, 0)
                     self.assertEqual((tx.state, tx.step), (3, step))
                     self.assertEqual(len(calls), step + 1)
+
+    def test_end_marker_does_not_replace_enable_or_policy(self):
+        for marker in (False, True):
+            for slot in range(32, 44):
+                for start in (0x40000000, 0x4e000000, 0x120000000, 0x83fffe000):
+                    with self.subTest(marker=marker, slot=slot, start=start):
+                        ret, tx, calls = self.run_case(start=start, base=start,
+                            size=4096, capacity=4096, slot=slot, end_marker=marker)
+                        self.assertEqual(ret, 0)
+                        self.assertEqual(len(calls), 21)
+                        self.assertEqual(tx.reply[11], (start + 4096) | ((1 << 43) if marker else 0))
+            for step, value in ((12, 0), (12, 2), (13, 0), (20, 0)):
+                ret, tx, calls = self.run_case(end_marker=marker, corrupt=(step, value))
+                self.assertEqual(ret, -errno.EIO)
+                self.assertEqual((tx.state, tx.step), (3, step))
+                self.assertEqual(len(calls), step + 1)
+        ret, tx, calls = self.run_case(start=0x4e000000, base=0x4e000000,
+            size=0x3410000, capacity=0x3410000, end_marker=False)
+        self.assertEqual(ret, 0)
+        self.assertEqual(tx.reply[11], 0x51410000)
+        self.assertEqual(len(calls), 21)
 
     def test_busy_slot_is_not_written(self):
         ret, tx, calls = self.run_case(corrupt=(0, 1))

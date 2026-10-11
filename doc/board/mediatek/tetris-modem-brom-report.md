@@ -308,5 +308,45 @@ previous SCP preparation/TCM/secure profile. Image size 3,307,616 bytes, SHA256
 Downloaded manifest and checksums match. It was written only to `lk_a` on the
 preserved `467ab09c` boot; synchronous completion and prefix readback match.
 Stock `lk_b` hash, Linux boot ID, USB/SSH and sensor services remain unchanged.
-The new image has not executed; physical cold startup/readback is pending.
-No rootfs/NV/calibration write or modem retry occurred.
+No rootfs/NV/calibration write or modem retry occurred during installation.
+
+## cbe37e8d user-requested warm readback
+
+The user requested automatic restart instead of physical power-off. One
+ordinary Linux reboot was issued. At 25.61-second uptime, boot
+`22ae0ce6-fa75-4d47-b6a4-2fd204a698b2` identifies `cbe37e8d2050`.
+This is explicitly a warm boot, not repeat cold validation. The first report
+still has bootstrap EMI `-EIO`, but the new transaction snapshot now identifies
+attempted1, slot32, outer operation0, range FAILED/step11 and retained end
+reply `0x51410000`. Enable/policy preflight, command0 and start readback passed;
+post-write enable/policy checks have NOT yet executed. No modem retry occurred.
+
+SCP preparation returns `-16` on inherited TCM; sensor service is failed and
+SensorProxy inactive. USB/SSH recover. A second failed unit is
+`systemd-coredumpd.service`; its cause is not established by the SCP report.
+First report and kernel journal are retained. No sensor module reload/reset
+was attempted. Cold-start display/sensors on `467ab09c` must not be reused as
+warm-start success for this boot.
+
+### End Address Versus Enable
+
+The pinned ATF payload `05a247cb...635ea32e` getter `0x2f428..0x2f460`
+loads a raw32-bit register and returns `0x40000000 + (raw << 12)`.
+Its writer `0x2d61c..0x2d66c` supplies23 relative page bits plus register bit31
+and separately updates the enable bitmap. Query3 `0x2f57c..0x2f5c0` reads that
+separate bitmap. The matching vendor `ee2be53` `emi-mpu-test-v2.c` also queries
+start/end and ENABLE independently. Register bit31 becomes returned bit43,
+outside the checked35-bit physical-address aperture. A synthetic RAM register
+retains that bit; the handset reply does not. This does not independently
+establish whether it is write-only, self-clearing or otherwise transformed.
+
+The range comparison now excludes only bit43 at end step11, preserving the
+full raw reply. All remaining bits of the start/end replies, return statuses,
+independent post-write enable==1 at step12 and all eight policy words before
+and after programming remain exact. No range, permission, call order or retry
+is changed. A missing/negative response still fails. Tests exercise both marker
+representations on all12 slots and wide addresses, require unchanged21 calls,
+reject every other corrupted reply bit and retain enable/policy failure stops.
+The observed endpoint is a synthetic regression vector, not proof that the
+remaining checks will pass or that the modem has reached BROM. CI and a new
+controlled readback are still required; no Linux secure/MMIO probe is used.

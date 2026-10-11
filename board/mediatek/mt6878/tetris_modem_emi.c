@@ -96,7 +96,7 @@ int tetris_modem_program_emi_range(unsigned long long start,
 {
 	struct tetris_modem_emi_range plan;
 	unsigned long long expected_policy[TETRIS_MODEM_EMI_POLICY_WORDS];
-	unsigned long long a, b, c, expected;
+	unsigned long long a, b, c, expected, compare_mask;
 	unsigned int step, operation;
 	int ret;
 
@@ -124,6 +124,7 @@ int tetris_modem_program_emi_range(unsigned long long start,
 		b = slot;
 		c = 0;
 		expected = 0;
+		compare_mask = ~0ULL;
 		switch (step) {
 		case 9:
 			operation = 0;
@@ -138,6 +139,11 @@ int tetris_modem_program_emi_range(unsigned long long start,
 		case 11:
 			a = 1;
 			expected = plan.end_readback;
+			/* ATF shifts raw register bit31 into bit43, not an address bit.
+			 * Slot enable is independently required at step12; no status
+			 * or address/policy bit can be hidden by this one-field mask.
+			 */
+			compare_mask &= ~TETRIS_MODEM_EMI_END_MARKER;
 			break;
 		case 12:
 			expected = 1;
@@ -157,7 +163,7 @@ int tetris_modem_program_emi_range(unsigned long long start,
 			       &transaction->reply[step]);
 		if (ret)
 			goto failed;
-		if (transaction->reply[step] != expected) {
+		if ((transaction->reply[step] & compare_mask) != (expected & compare_mask)) {
 			ret = step == 0 && transaction->reply[step] == 1 ? -EBUSY : -EIO;
 			goto failed;
 		}

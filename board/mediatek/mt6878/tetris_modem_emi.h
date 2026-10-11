@@ -11,6 +11,8 @@ enum tetris_modem_emi_state {
 
 #define TETRIS_MODEM_EMI_POLICY_WORDS 8
 #define TETRIS_MODEM_EMI_STEPS 21
+/* Raw end-register bit31 shifted by12, outside the 35-bit address aperture. */
+#define TETRIS_MODEM_EMI_END_MARKER (1ULL << 43)
 
 struct tetris_modem_emi_transaction {
 	unsigned int state;

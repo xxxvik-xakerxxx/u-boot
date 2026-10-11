@@ -122,6 +122,7 @@ jobs:
           python3 -B .github/tests/test_tetris_ufs_identity.py --native-ci
           python3 -B .github/tests/test_tetris_modem_power_ack.py
           python3 -B .github/tests/test_tetris_modem_power_ack.py --native-ci
+          python3 -B .github/tests/test_tetris_modem_emi_endpoint.py
           python3 -B .github/tests/test_tetris_modem_startup_off.py
           python3 -B .github/tests/test_tetris_modem_startup_off.py --native-ci
 

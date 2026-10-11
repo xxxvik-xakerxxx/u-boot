@@ -536,7 +536,7 @@ int tetris_modem_plan_emi(unsigned long long start, unsigned long long size,
 	out.start_page = start >> 12;
 	out.end_page = (start + size) >> 12;
 	out.start_readback = start;
-	/* The raw end getter retains the enable marker from register bit 31. */
+	/* Raw getter exemplar with bit31 exposed; callers separately verify enable. */
 	out.end_readback = (start + size) | (1ULL << 43);
 	out.slot = slot;
 	*range = out;
