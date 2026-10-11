@@ -204,8 +204,20 @@ config TETRIS_MODEM_BROM_ONLY
 	  Explicit diagnostic only. Validate slot A, the selected UFS boot-LUN
 	  GFH and stock ATF, then authenticate modem firmware before the finite
 	  EMI/remap/power/BROM sequence. Linux MD drivers remain disabled and
-	  no CCCI descriptor is published. Preserve the first error and RAM
+	  no CCCI descriptor is published unless the separate metadata-only
+	  option is selected. Preserve the first error and RAM
 	  reservations for recovery; no retries or SIM readiness claim.
+
+config TETRIS_MODEM_METADATA_HANDOFF
+	bool "Publish owned CCCI metadata after successful Tetris BROM"
+	depends on TETRIS_MODEM_BROM_ONLY
+	default n
+	help
+	  Encode the authenticated loader's retained firmware and SMEM tables
+	  only after successful BROM and report publication. Reserve and clean
+	  a fresh 64 KiB no-map AP tag buffer, then atomically publish the exact
+	  CCCI descriptor in a cloned DT. Require a disabled sole MD consumer;
+	  do not enable drivers, map MD memory, retry or claim runtime READY.
 
 config TETRIS_MODEM_STARTUP_OFF_DIAGNOSTIC
 	bool "Tetris one-attempt initial modem power-off experiment"

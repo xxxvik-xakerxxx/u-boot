@@ -1780,6 +1780,11 @@ void board_prep_linux(struct bootm_headers *images)
 		 * hardware failure. Never revert it or reuse the borrowed old pointer.
 		 */
 		fdt = images->ft_addr;
+		if (!ret && IS_ENABLED(CONFIG_TETRIS_MODEM_METADATA_HANDOFF)) {
+			ret = tetris_modem_publish_final(images);
+			printf("Tetris MD owned metadata handoff: %d (Linux MD disabled)\n", ret);
+			fdt = images->ft_addr;
+		}
 	}
 	if (IS_ENABLED(CONFIG_TETRIS_MODEM_LOAD_DIAGNOSTIC)) {
 		ret = tetris_modem_load_diagnostic(fdt);

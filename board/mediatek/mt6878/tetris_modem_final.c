@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0+
+#ifndef TETRIS_MODEM_FINAL_HOST_TEST
 #include <bootm.h>
 #include <cpu_func.h>
 #include <lmb.h>
@@ -6,10 +7,12 @@
 #include <stdio.h>
 #include <asm/cache.h>
 #include <linux/errno.h>
+#include <linux/kconfig.h>
 #include <linux/libfdt.h>
 #include <linux/string.h>
 #include "tetris_modem_ccci_tags.h"
 #include "tetris_modem_final.h"
+#endif
 
 #define TAG_CAPACITY 65536UL
 #define DT_MAX 0x200000UL
@@ -34,6 +37,9 @@ static int consumer(const void *fdt)
 	second = fdt_node_offset_by_compatible(fdt, node, "mediatek,mddriver");
 	if (second != -FDT_ERR_NOTFOUND)
 		return second < 0 ? second : -EEXIST;
+	property = fdt_getprop(fdt, node, "status", &length);
+	if (!property || length != 9 || memcmp(property, "disabled", 9))
+		return -EBUSY;
 	property = fdt_getprop(fdt, node, "ccci,modem_info_v2", &length);
 	if (property || length != -FDT_ERR_NOTFOUND)
 		return property ? -EEXIST : length;
@@ -79,6 +85,8 @@ int tetris_modem_publish_final(struct bootm_headers *images)
 	int node, ret, bytes, cleanup_ret;
 	unsigned int have_tags = 0, have_dt = 0;
 
+	if (!IS_ENABLED(CONFIG_TETRIS_MODEM_METADATA_HANDOFF))
+		return -EPERM;
 	if (attempted)
 		return first_error ? first_error : -EALREADY;
 	attempted = 1;
@@ -100,7 +108,8 @@ int tetris_modem_publish_final(struct bootm_headers *images)
 	/* Kernel maps MAX_LK_INFO_SIZE=64KiB, even when descriptor size is smaller.
 	 * Reserve/zero/clean the ENTIRE buffer, not merely the encoded payload.
 	 */
-	ret = lmb_alloc_mem(LMB_MEM_ALLOC_MAX, 4096, &tag_address, TAG_CAPACITY, LMB_NOOVERWRITE);
+	/* Keep the entire no-map tag buffer page-aligned for 4/16/64 KiB Linux. */
+	ret = lmb_alloc_mem(LMB_MEM_ALLOC_MAX, TAG_CAPACITY, &tag_address, TAG_CAPACITY, LMB_NOOVERWRITE);
 	if (ret)
 		goto fail;
 	have_tags = 1;

@@ -407,3 +407,29 @@ TCM recovery remains unresolved. Linux still has no CCCI runtime consumer,
 render node, video/media capture or GNSS device; BROM success is not SIM/calls,
 GPS fix, GPU acceleration or camera support. No partitions or runtime hardware
 state were changed during this readback.
+
+## Owned Metadata Handoff Candidate
+
+`TETRIS_MODEM_METADATA_HANDOFF` is a separate default-off option dependent on
+BROM-only admission. It calls the existing final producer only when the entire
+BROM board transaction, including report publication, returns zero. The real
+retained loader capsule must still be COMPLETE/error0 before it can encode the
+21 firmware/SMEM tags; Linux cannot synthesize them from the report.
+
+The final publisher requires a sole disabled MD consumer and no inherited
+CCCI descriptor. It allocates a fresh 64 KiB AP-only tag buffer aligned for
+4/16/64 KiB kernel pages, zeroes the whole capacity and clones the current DT.
+Only after no-map reservation, exact LE descriptor creation, full DT validation
+and both cache cleans does it replace the boot DT pointer. An unpublished
+failure frees only new AP allocations, retains the first error and never
+releases the running modem's firmware/service banks. The original report and
+reservation-bearing DT remain intact. No additional secure call, MD MMIO,
+driver enablement or reset/retry is introduced.
+
+CI dispatch input `modem_metadata=true` requires `modem_brom_only=true` and the
+same existing SCP/startup-OFF inputs. Its manifest distinguishes owned metadata
+from the previous descriptor-free diagnostic. Source-only checks pass; actual
+publisher transactions use real libfdt with synthetic allocator/encoder faults
+under CI sanitizers. ARM build and physical descriptor readback are still
+pending. This is a concrete producer prerequisite for Linux metadata import,
+not operational SMEM permission, transport READY or working SIM/calls.

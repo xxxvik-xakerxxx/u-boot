@@ -6,7 +6,7 @@ struct bootm_headers;
 /* Only the real private loader owner produces these bytes after actual BROM. */
 int tetris_modem_loaded_encode_tags(void *buffer, size_t size);
 /* Separate opt-in final publication. Does not enable Linux drivers or power MD.
- * Requires the original consumer node, rejects inherited descriptors, clones
+ * Requires a disabled sole consumer node, rejects inherited descriptors, clones
  * the CURRENT final DT (including earlier GPU changes), and commits once.
  */
 int tetris_modem_publish_final(struct bootm_headers *images);

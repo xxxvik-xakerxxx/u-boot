@@ -32,6 +32,11 @@ on:
         required: false
         type: boolean
         default: false
+      modem_metadata:
+        description: 'After BROM publish owned CCCI metadata only; Linux MD stays disabled'
+        required: false
+        type: boolean
+        default: false
       scp_prepare:
         description: 'Enable audited slot-A SCP decryption experiment (no TCM/reset)'
         required: false
@@ -116,6 +121,8 @@ jobs:
           sh .github/tests/run_tetris_modem_observe.sh
           python3 -B .github/tests/test_tetris_modem_brom_board.py
           sh .github/tests/run_tetris_modem_brom_board.sh
+          python3 -B .github/tests/test_tetris_modem_final.py
+          sh .github/tests/run_tetris_modem_final.sh
           python3 -B .github/tests/test_tetris_modem_linux_policy.py
           sh .github/tests/run_tetris_modem_linux_policy.sh
           python3 -B .github/tests/test_tetris_ufs_identity.py
@@ -217,6 +224,7 @@ jobs:
           MODEM_EMI_OBSERVE: ${{ inputs.modem_emi_observe || false }}
           MODEM_BROM_ONLY: ${{ inputs.modem_brom_only || false }}
           MODEM_STARTUP_OFF: ${{ inputs.modem_startup_off || false }}
+          MODEM_METADATA: ${{ inputs.modem_metadata || false }}
           SCP_TCM: ${{ inputs.scp_tcm || false }}
           SCP_SECURE: ${{ inputs.scp_secure || false }}
           GPUEB_TRANSFORM: ${{ inputs.gpueb_transform || false }}
@@ -275,6 +283,12 @@ jobs:
             scripts/config --enable TETRIS_MODEM_STARTUP_OFF_DIAGNOSTIC
             make olddefconfig
             grep -qx 'CONFIG_TETRIS_MODEM_STARTUP_OFF_DIAGNOSTIC=y' .config
+          fi
+          if [ "$MODEM_METADATA" = true ]; then
+            test "$MODEM_BROM_ONLY" = true
+            scripts/config --enable TETRIS_MODEM_METADATA_HANDOFF
+            make olddefconfig
+            grep -qx 'CONFIG_TETRIS_MODEM_METADATA_HANDOFF=y' .config
           fi
           if [ "$GPUEB_TRANSFORM" = true ]; then
             test "$GPUEB_FLAT_RETENTION" = false
@@ -629,9 +643,18 @@ jobs:
             printf 'modem_startup_off=disabled\n' >> BUILD-MANIFEST
           fi
           if grep -qx 'CONFIG_TETRIS_MODEM_BROM_ONLY=y' .config; then
-            printf 'modem_brom_only=cold-one-attempt-no-ccci-descriptor\n' >> BUILD-MANIFEST
+            if grep -qx 'CONFIG_TETRIS_MODEM_METADATA_HANDOFF=y' .config; then
+              printf 'modem_brom_only=cold-one-attempt-owned-metadata-linux-md-disabled\n' >> BUILD-MANIFEST
+            else
+              printf 'modem_brom_only=cold-one-attempt-no-ccci-descriptor\n' >> BUILD-MANIFEST
+            fi
           else
             printf 'modem_brom_only=disabled\n' >> BUILD-MANIFEST
+          fi
+          if grep -qx 'CONFIG_TETRIS_MODEM_METADATA_HANDOFF=y' .config; then
+            printf 'modem_metadata=owned-64k-nomap-after-brom-linux-md-disabled\n' >> BUILD-MANIFEST
+          else
+            printf 'modem_metadata=disabled\n' >> BUILD-MANIFEST
           fi
           if grep -qx 'CONFIG_TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC=y' .config; then
             printf 'gpueb_flat_retention=slot-a-authenticated-private-no-start\n' >> BUILD-MANIFEST
