@@ -207,6 +207,19 @@ config TETRIS_MODEM_BROM_ONLY
 	  no CCCI descriptor is published. Preserve the first error and RAM
 	  reservations for recovery; no retries or SIM readiness claim.
 
+config TETRIS_MODEM_STARTUP_OFF_DIAGNOSTIC
+	bool "Tetris one-attempt initial modem power-off experiment"
+	depends on TETRIS_MODEM_BROM_ONLY
+	default n
+	help
+	  Separate source-backed initial owner after boot-policy and stock ATF
+	  admission. Only coherent PWR_ON/ACK30 admits the matching LK bus-
+	  protection, power-off, isolation and clock sequence. Bound all waits
+	  and stop on the first error; do not reset or retry. Strict OFF remains
+	  required before placed-RAM writes. Ordinary BROM builds still reject
+	  inherited ON. NS write permission and physical startup are unproven;
+	  this diagnostic can hang the phone and requires a recovery path.
+
 config TETRIS_MODEM_EMI_OBSERVE_DIAGNOSTIC
 	bool "Read pinned secure modem EMI state without programming it"
 	depends on TETRIS_MODEM_LOAD_DIAGNOSTIC && TETRIS_SCP_PREPARE_DIAGNOSTIC

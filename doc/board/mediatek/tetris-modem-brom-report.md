@@ -193,3 +193,41 @@ unowned inherited domain or remove the strict-OFF guard. No Linux MMIO/reset,
 firmware copy, reservation, SMEM write or retry was issued on this boot.
 USB/SSH, all three sensor services, firmware-ready and the 24-entry/mask-31
 sensor inventory recovered automatically; the first kernel journal is retained.
+
+## Separate initial power-off diagnostic
+
+`CONFIG_TETRIS_MODEM_STARTUP_OFF_DIAGNOSTIC` is a separate default-off option
+requiring the BROM-only caller. It runs only after the same boot-policy,
+preloader and ATF admission, and before the existing strict-OFF check and any
+placed-RAM reservation/write. The original BROM-only mode still rejects ON.
+The loaded owner's existing one-attempt latch owns this operation; bootstrap
+failure cleanup remains limited to transitions that bootstrap initiated.
+
+Authoritative LK payload SHA256
+`431e0551382e21f4edfb8ff3ca05cd67b177d40b1a51f9e863965eea58f8b94a`:
+its `0x54d28` routine acknowledges IFR9 bit9, IFR11 bit11 and NEMI mask `0xc0`
+in that order, clears only MD PWR_ON bit2, waits ACK30 clear, then sets EXTISO
+mask3. Its OFF wrapper `0x816d4` subsequently sets TOPCKGEN mask `0x300`.
+The matching Nothing `ee2be53` scpsys MD operations agree. That release's
+`md_sys1_platform.c` also explicitly matches LK ON during probe and powers
+off in first-start handling. This is expected source behavior, not proof that
+the replaced LK caused the current preloader-to-U-Boot initial ON state.
+
+The diagnostic admits only coherent ON/PWR_ACK30; mixed states reject without
+writes. Already OFF performs no mutation and still requires all existing OFF
+conditions. After protection acknowledgements, ON is rechecked before clearing
+power; a newly changed state stops immediately. Every wait is bounded to
+10,000 samples with 9,999 ten-microsecond intervals. Any error stops the sequence
+without reset, secondary-power-bit write, cleanup, retry or firmware placement.
+Appended loaded stages12..18 identify initial state, IFR9, IFR11, NEMI, power,
+isolation and clock; old stage values and the original 80-byte report ABI stay
+unchanged. Existing loaded address/value fields preserve the failing sample.
+
+`test_tetris_modem_startup_off.py` extracts actual production helpers and enums.
+Its GitHub-CI-only ASAN/UBSAN fixture covers 13 synthetic-MMIO cases: ON with
+either ACK31 value, OFF/no-write, both partial states, each of six stop-on-first-
+timeout boundaries, unrelated-bit preservation, changed-state refusal and
+first-error retention. This does not establish actual NS write access, secure-
+world initial ownership, BROM success or SIM support. Real ARM image CI and
+one controlled handset boot with an intact recovery path are still required.
+The typed CI input and manifest distinguish this opt-in from ordinary builds.

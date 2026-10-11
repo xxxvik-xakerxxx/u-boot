@@ -6,6 +6,7 @@
 #include <asm/u-boot.h>
 #include <cpu_func.h>
 #include <mapmem.h>
+#include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/string.h>
 #include "tetris_modem_loaded_boot.h"
@@ -79,6 +80,81 @@ static int cold_off(void)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_TETRIS_MODEM_STARTUP_OFF_DIAGNOSTIC)
+static unsigned int startup_read(unsigned long address)
+{
+	owner.report.address = address;
+	owner.report.value = readl((const volatile void *)address);
+	return owner.report.value;
+}
+
+static int startup_wait(unsigned long address, unsigned int mask,
+			unsigned int expected)
+{
+	unsigned int i;
+
+	for (i = 0; i < 10000; i++) {
+		if ((startup_read(address) & mask) == expected)
+			return 0;
+		if (i + 1 < 10000)
+			udelay(10);
+	}
+	return -ETIMEDOUT;
+}
+
+static int startup_off(void)
+{
+	/* Matching B4.1 LK 0x54d28 plus its 0x816d4 clock wrapper.
+	 * This is initial ownership, NOT bootstrap failure cleanup or a retry.
+	 * Partial ON/ACK states remain unowned; no reset/secondary power bit.
+	 */
+	static const struct {
+		unsigned long set, status;
+		unsigned int mask, stage;
+	} protection[] = {
+		{ 0x10001c54UL, 0x10001c5cUL, 0x200, TETRIS_MD_LOAD_STARTUP_IFR9 },
+		{ 0x10001c44UL, 0x10001c4cUL, 0x800, TETRIS_MD_LOAD_STARTUP_IFR11 },
+		{ 0x10270084UL, 0x1027008cUL, 0xc0, TETRIS_MD_LOAD_STARTUP_NEMI },
+	};
+	const unsigned int power_mask = 4U | TETRIS_MD_POWER_ACK;
+	unsigned int value, i;
+	int ret;
+
+	owner.report.stage = TETRIS_MD_LOAD_STARTUP_STATE;
+	value = startup_read(0x1c001e00UL) & power_mask;
+	if (!value)
+		return 0; /* Existing cold_off still verifies all OFF conditions. */
+	if (value != power_mask)
+		return -EBUSY;
+	for (i = 0; i < 3; i++) {
+		owner.report.stage = protection[i].stage;
+		writel(protection[i].mask, (volatile void *)protection[i].set);
+		ret = startup_wait(protection[i].status, protection[i].mask,
+				   protection[i].mask);
+		if (ret)
+			return ret;
+	}
+	owner.report.stage = TETRIS_MD_LOAD_STARTUP_POWER;
+	value = startup_read(0x1c001e00UL);
+	if ((value & power_mask) != power_mask)
+		return -EBUSY; /* Another transition appeared; do not claim ownership. */
+	writel(value & ~4U, (volatile void *)0x1c001e00UL);
+	ret = startup_wait(0x1c001e00UL, power_mask, 0);
+	if (ret)
+		return ret;
+	owner.report.stage = TETRIS_MD_LOAD_STARTUP_ISOLATION;
+	value = startup_read(0x1c001f24UL);
+	writel(value | 3U, (volatile void *)0x1c001f24UL);
+	ret = startup_wait(0x1c001f24UL, 3, 3);
+	if (ret)
+		return ret;
+	owner.report.stage = TETRIS_MD_LOAD_STARTUP_CLOCK;
+	value = startup_read(0x10000000UL);
+	writel(value | 0x300U, (volatile void *)0x10000000UL);
+	return startup_wait(0x10000000UL, 0x300, 0x300);
+}
+#endif
+
 static int find_dram(struct tetris_modem_emi_resources *resources)
 {
 	const struct tetris_modem_emi_window *w[] = {
@@ -147,6 +223,11 @@ int tetris_modem_loaded_boot_once(void *fdt, struct blk_desc *dev, char slot,
 	ret = tetris_scp_check_atf_profile(dev);
 	if (ret)
 		return fail(ret);
+#if IS_ENABLED(CONFIG_TETRIS_MODEM_STARTUP_OFF_DIAGNOSTIC)
+	ret = startup_off();
+	if (ret)
+		return fail(ret);
+#endif
 	owner.report.stage = TETRIS_MD_LOAD_OFF;
 	ret = cold_off();
 	if (ret)

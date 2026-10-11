@@ -27,6 +27,11 @@ on:
         required: false
         type: boolean
         default: false
+      modem_startup_off:
+        description: 'Initial LK MD power-off once before BROM; experimental, no reset/retry'
+        required: false
+        type: boolean
+        default: false
       scp_prepare:
         description: 'Enable audited slot-A SCP decryption experiment (no TCM/reset)'
         required: false
@@ -117,6 +122,8 @@ jobs:
           python3 -B .github/tests/test_tetris_ufs_identity.py --native-ci
           python3 -B .github/tests/test_tetris_modem_power_ack.py
           python3 -B .github/tests/test_tetris_modem_power_ack.py --native-ci
+          python3 -B .github/tests/test_tetris_modem_startup_off.py
+          python3 -B .github/tests/test_tetris_modem_startup_off.py --native-ci
 
       - name: Test native SCP and modem certificate verifiers
         run: PYTHON=.venv/bin/python sh .github/tests/run_tetris_scp_security_c.sh
@@ -208,6 +215,7 @@ jobs:
           MODEM_LOAD: ${{ inputs.modem_load || false }}
           MODEM_EMI_OBSERVE: ${{ inputs.modem_emi_observe || false }}
           MODEM_BROM_ONLY: ${{ inputs.modem_brom_only || false }}
+          MODEM_STARTUP_OFF: ${{ inputs.modem_startup_off || false }}
           SCP_TCM: ${{ inputs.scp_tcm || false }}
           SCP_SECURE: ${{ inputs.scp_secure || false }}
           GPUEB_TRANSFORM: ${{ inputs.gpueb_transform || false }}
@@ -260,6 +268,12 @@ jobs:
             scripts/config --enable TETRIS_MODEM_BROM_ONLY
             make olddefconfig
             grep -qx 'CONFIG_TETRIS_MODEM_BROM_ONLY=y' .config
+          fi
+          if [ "$MODEM_STARTUP_OFF" = true ]; then
+            test "$MODEM_BROM_ONLY" = true
+            scripts/config --enable TETRIS_MODEM_STARTUP_OFF_DIAGNOSTIC
+            make olddefconfig
+            grep -qx 'CONFIG_TETRIS_MODEM_STARTUP_OFF_DIAGNOSTIC=y' .config
           fi
           if [ "$GPUEB_TRANSFORM" = true ]; then
             test "$GPUEB_FLAT_RETENTION" = false
@@ -608,6 +622,11 @@ jobs:
       - name: Write artifact checksums
         run: |
           printf 'commit=%s\n' "$GITHUB_SHA" > BUILD-MANIFEST
+          if grep -qx 'CONFIG_TETRIS_MODEM_STARTUP_OFF_DIAGNOSTIC=y' .config; then
+            printf 'modem_startup_off=initial-lk-one-attempt-before-ram-writes\n' >> BUILD-MANIFEST
+          else
+            printf 'modem_startup_off=disabled\n' >> BUILD-MANIFEST
+          fi
           if grep -qx 'CONFIG_TETRIS_MODEM_BROM_ONLY=y' .config; then
             printf 'modem_brom_only=cold-one-attempt-no-ccci-descriptor\n' >> BUILD-MANIFEST
           else
