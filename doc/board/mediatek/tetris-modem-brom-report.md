@@ -296,3 +296,17 @@ padding/preset failures, invalid slot/step bounds, unavailable reports and
 early/late publication faults preserving the first error. Physical readback
 of this new record requires a separately built candidate; it cannot recover
 the missing transaction from the already running `467ab09c` image.
+
+Candidate `cbe37e8d2050bacb410c91b1f7602e549dd09098` passed ordinary
+[CI 38111717370](https://github.com/xxxvik-xakerxxx/u-boot/actions/runs/38111717370).
+The first diagnostic dispatch passed native fixtures but rejected the omitted
+SCP TCM dependency at configuration; it produced no image. Corrected
+[CI 38111943244](https://github.com/xxxvik-xakerxxx/u-boot/actions/runs/38111943244)
+passed all native and ARM image gates with startup-OFF/BROM and the complete
+previous SCP preparation/TCM/secure profile. Image size 3,307,616 bytes, SHA256
+`238b118b0c757e73ea2e5e8239811f586b104edb540af12165f9419f552e638d`.
+Downloaded manifest and checksums match. It was written only to `lk_a` on the
+preserved `467ab09c` boot; synchronous completion and prefix readback match.
+Stock `lk_b` hash, Linux boot ID, USB/SSH and sensor services remain unchanged.
+The new image has not executed; physical cold startup/readback is pending.
+No rootfs/NV/calibration write or modem retry occurred.
