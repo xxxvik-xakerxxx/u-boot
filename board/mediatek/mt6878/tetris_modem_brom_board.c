@@ -88,6 +88,30 @@ static int publish(void *fdt, const unsigned char recorded[80], unsigned int sta
 	fdt64_t loaded_address = cpu_to_fdt64(loaded ? loaded->address : 0);
 	unsigned int i;
 	int chosen, ret, error = 0;
+	unsigned char emi_record[64] = { 0 };
+
+	/* Snapshot the existing transaction only; never reread secure state. */
+	put32(emi_record, 1);
+	put32(emi_record + 4, loaded != NULL);
+	if (loaded) {
+		const struct tetris_modem_emi_rows_transaction *tx = &loaded->hardware.emi;
+
+		put32(emi_record + 8, tx->attempted);
+		put32(emi_record + 12, tx->slot);
+		put32(emi_record + 16, tx->operation);
+		put32(emi_record + 20, (unsigned int)tx->error);
+		if (tx->slot >= 32 && tx->slot <= 43) {
+			const struct tetris_modem_emi_transaction *range = &tx->ranges[tx->slot - 32];
+
+			put32(emi_record + 24, range->state);
+			put32(emi_record + 28, range->step);
+			if (range->state && range->step < TETRIS_MODEM_EMI_STEPS)
+				put64(emi_record + 32, range->reply[range->step]);
+		}
+		put32(emi_record + 40, tx->padding.attempted);
+		put32(emi_record + 44, tx->padding.step);
+		put64(emi_record + 48, tx->reply);
+	}
 
 	chosen = fdt_path_offset(fdt, "/chosen");
 	if (chosen == -FDT_ERR_NOTFOUND)
@@ -107,6 +131,11 @@ static int publish(void *fdt, const unsigned char recorded[80], unsigned int sta
 	ret = chosen < 0 ? chosen : fdt_setprop(fdt, chosen,
 		"nothing,modem-brom-loaded-address", &loaded_address,
 		sizeof(loaded_address));
+	if (ret && !error)
+		error = ret;
+	chosen = fdt_path_offset(fdt, "/chosen");
+	ret = chosen < 0 ? chosen : fdt_setprop(fdt, chosen,
+		"nothing,modem-brom-emi-report", emi_record, sizeof(emi_record));
 	if (ret && !error)
 		error = ret;
 	return error;

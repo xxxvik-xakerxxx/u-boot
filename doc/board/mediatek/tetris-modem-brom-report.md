@@ -231,3 +231,68 @@ first-error retention. This does not establish actual NS write access, secure-
 world initial ownership, BROM success or SIM support. Real ARM image CI and
 one controlled handset boot with an intact recovery path are still required.
 The typed CI input and manifest distinguish this opt-in from ordinary builds.
+
+At `467ab09cabf8017d2d37a3663f0fcbf732d71598`,
+[CI 38111053855](https://github.com/xxxvik-xakerxxx/u-boot/actions/runs/38111053855)
+passed the 13 startup-OFF sanitizer cases, 21 ACK30 cases and complete ARM64
+image gates. Manifest opts into startup-OFF/BROM and the previous SCP secure
+preparation; GPUEB experiments remain disabled. All downloaded checksums pass.
+Image size 3,307,168, SHA256
+`081db33b8f9e0fd589dda3735172dc29ae7782199e36536083294ab175444741`.
+It was written only to `lk_a` from the existing cold Linux baseline; synchronous
+completion and prefix readback match. Stock `lk_b`'s full hash is unchanged.
+No rootfs/NV/calibration write occurred.
+
+## 467ab09c first cold readback
+
+On 2026-10-11 the user completed USB-disconnected physical power-off, a
+ten-second wait, normal power-on and USB reconnect. The new Linux boot ID is
+`b6ef1b70-b1f6-45b7-8b8a-bbc0a9c1fbec`; `u-boot,version` matches
+`467ab09cabf8`. Initial SSH password authentication failed, but a single fresh
+connection using the same password and strict matching host key succeeded.
+No reset, modem retry or live MMIO access was issued.
+
+The first saved report has loader/loaded error `-5` (`-EIO`), report-fetch 0,
+loaded stage 10 (bootstrap), hardware stage 3 (EMI), cleanup stage/error 0,
+board stage 15, failed status 2 and publication error 0. Reaching EMI proves
+the initial owner and both strict-OFF checks passed, as did authenticated
+placement and service preparation. It does not prove EMI programming completed
+or modem BROM ran. Hardware address/value `0x1027008c = 0xc1` are the last
+strict-OFF sample, not the failed secure operation; reply fields are zero
+because the EMI transaction is separate. The v1 report cannot identify the
+failed EMI row/query. Do not infer a permissions mismatch or relax validation
+from `-EIO` alone. USB/SSH and all sensor services recovered, firmware-ready,
+24 entries and mask31 remain present; no kernel Oops/BUG/SError/panic/WARNING
+was found. The user confirmed display, touch, both rotations and auto-brightness.
+
+### EMI transaction snapshot
+
+`nothing,modem-brom-emi-report` adds a fixed 64-byte little-endian observation
+record; the original 80-byte report remains unchanged. Placeholders precede
+loader entry. It copies the already retained `hardware.emi` transaction and
+adds no MMIO, SMC, policy/range write, cleanup or retry. Offsets:
+
+| Offset | Field |
+| --- | --- |
+| 0 | Format version 1 |
+| 4 | Loaded report available, not hardware readiness |
+| 8 | EMI transaction attempted |
+| 12 | Current slot |
+| 16 | Outer operation: 0 range transaction, 2 preset observation, 6 preset write |
+| 20 | Signed first EMI error represented as u32 |
+| 24 / 28 | Current range state / step, zero when slot is outside32..43 |
+| 32 | u64 retained range reply, zero for fresh/out-of-bounds step |
+| 40 / 44 | Padding observation attempted / step |
+| 48 | u64 retained preset-write reply |
+| 56 / 60 | Reserved zero |
+
+For outer operation0 the exact secure query comes from range step: 0 enable,
+1..8 policy groups0..7, 9 range write, 10 start, 11 end, 12 enable,
+13..20 policy groups0..7. A fresh range/preset reply zero is unobserved;
+callbacks that fail without supplying a value leave the existing poisoned
+sentinel, not an actual ATF reply. No partial padding policy is fabricated.
+The CI-only libfdt fixture covers all12 slot indexes, 64-bit reply retention,
+padding/preset failures, invalid slot/step bounds, unavailable reports and
+early/late publication faults preserving the first error. Physical readback
+of this new record requires a separately built candidate; it cannot recover
+the missing transaction from the already running `467ab09c` image.

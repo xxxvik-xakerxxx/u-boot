@@ -37,6 +37,19 @@ class BoardReportTests(unittest.TestCase):
         self.assertIn('lmb_free(address, capacity', cleanup)
         self.assertNotIn('map_sysmem(images->ft_addr', source)
 
+    def test_emi_snapshot_is_observation_only_and_bounded(self):
+        source = (ROOT / 'board/mediatek/mt6878/tetris_modem_brom_board.c').read_text()
+        publish = source[source.index('static int publish('):
+                         source.index('int tetris_modem_brom_only_board(')]
+        self.assertIn('unsigned char emi_record[64] = { 0 }', publish)
+        self.assertIn('nothing,modem-brom-emi-report', publish)
+        self.assertIn('tx->slot >= 32 && tx->slot <= 43', publish)
+        self.assertIn('range->step < TETRIS_MODEM_EMI_STEPS', publish)
+        self.assertIn('put32(emi_record + 4, loaded != NULL)', publish)
+        self.assertNotIn('arm_smccc', publish)
+        self.assertNotIn('ops->smc', publish)
+        self.assertNotIn('readl(', publish)
+
     def test_bootm_uses_replaced_pointer(self):
         boot = (ROOT / 'arch/arm/lib/bootm.c').read_text()
         board = (ROOT / 'board/mediatek/mt6878/mt6878_tetris.c').read_text()

@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <libfdt.h>
+#include "../../board/mediatek/mt6878/tetris_modem_emi_rows.h"
 
 typedef uint64_t phys_addr_t;
 typedef uint64_t phys_size_t;
@@ -31,6 +32,7 @@ struct tetris_modem_loaded_report {
 		int error;
 		unsigned long long address, reply[4];
 		struct { unsigned int stage; int error; } cleanup;
+		struct tetris_modem_emi_rows_transaction emi;
 	} hardware;
 };
 #define CONFIG_TETRIS_MODEM_BROM_ONLY 1
@@ -48,6 +50,7 @@ static int allocations, frees, unmaps, flushes, loader_publication_fault;
 static unsigned int loaded_stage, loaded_value;
 static unsigned long loaded_address;
 static unsigned long long hardware_address;
+static struct tetris_modem_emi_rows_transaction emi_transaction;
 static void *allocation;
 static struct blk_desc device;
 
@@ -111,6 +114,9 @@ static int mock_setprop(void *fdt, int node, const char *name, const void *data,
 	if ((fault == 10 || (fault == 11 && loader_calls)) &&
 	    !strcmp(name, "nothing,modem-brom-loaded-address"))
 		return -FDT_ERR_NOSPACE;
+	if ((fault == 12 || (fault == 13 && loader_calls)) &&
+	    !strcmp(name, "nothing,modem-brom-emi-report"))
+		return -FDT_ERR_NOSPACE;
 	return fdt_setprop(fdt, node, name, data, size);
 }
 static unsigned int get32(const unsigned char *p)
@@ -124,6 +130,9 @@ static int tetris_modem_linux_b41_once(void *fdt, struct blk_desc *dev, char slo
 	const unsigned char *record = fdt_getprop(fdt, node, "nothing,modem-brom-report", &length);
 	assert(dev == &device && slot == 'a' && record && length == 80);
 	assert(get32(record) == 1 && (int)get32(record + 4) == -EINPROGRESS);
+	record = fdt_getprop(fdt, node, "nothing,modem-brom-emi-report", &length);
+	assert(record && length == 64 && get32(record) == 1);
+	assert(!get32(record + 4) && !get32(record + 8));
 	assert(fdt_num_mem_rsv(fdt) == 1);
 	assert(flushes == 1);
 	loader_calls++;
@@ -140,6 +149,7 @@ static int tetris_modem_loaded_boot_report(struct tetris_modem_loaded_report *re
 	report->error = loader_error;
 	report->hardware.address = hardware_address;
 	report->hardware.reply[3] = 0xfedcba9876543210ULL;
+	report->hardware.emi = emi_transaction;
 	return report_error;
 }
 #define fdt_open_into mock_open
@@ -196,6 +206,7 @@ static void reset(void)
 	loaded_stage = 11; loaded_value = 0xaabbccdd;
 	loaded_address = 0x123456789abcdef0UL;
 	hardware_address = 0x123456789abcdef0ULL;
+	memset(&emi_transaction, 0, sizeof(emi_transaction));
 }
 int main(void)
 {
@@ -247,6 +258,66 @@ int main(void)
 	assert(record && length == 80 && get32(record) == 1 && get32(record + 12) == 2);
 	assert(get32(record + 36) == 0 && get32(record + 40) == 0 && get32(record + 44) == 0);
 	assert(tetris_modem_brom_only_board(&images) == -EBUSY && loader_calls == 1);
+	/* Every retained range failure exposes the original slot/step/full reply. */
+	for (i = 0; i < 12; i++) {
+		struct tetris_modem_emi_transaction *range;
+		reset(); tree(original, 0, 0);
+		images = (struct bootm_headers){ original, sizeof(original) };
+		loader_error = -EIO;
+		emi_transaction.attempted = 1;
+		emi_transaction.slot = i + 32;
+		emi_transaction.operation = 0;
+		emi_transaction.error = -EIO;
+		range = &emi_transaction.ranges[i];
+		range->state = TETRIS_MODEM_EMI_FAILED;
+		range->step = i;
+		range->reply[i] = 0xfedcba9876543210ULL + i;
+		assert(tetris_modem_brom_only_board(&images) == -EIO && loader_calls == 1);
+		record = fdt_getprop(images.ft_addr, fdt_path_offset(images.ft_addr, "/chosen"),
+			"nothing,modem-brom-emi-report", &length);
+		assert(record && length == 64 && get32(record) == 1);
+		assert(get32(record + 4) == 1 && get32(record + 8) == 1);
+		assert(get32(record + 12) == (unsigned int)i + 32);
+		assert(get32(record + 16) == 0 && (int)get32(record + 20) == -EIO);
+		assert(get32(record + 24) == TETRIS_MODEM_EMI_FAILED);
+		assert(get32(record + 28) == (unsigned int)i);
+		assert(get32(record + 32) == 0x76543210U + i);
+		assert(get32(record + 36) == 0xfedcba98U);
+		assert(!get32(record + 56) && !get32(record + 60));
+		assert(tetris_modem_brom_only_board(&images) == -EIO && loader_calls == 1);
+	}
+	/* Preset/padding errors and malformed indexes must not select a range. */
+	for (i = 0; i < 4; i++) {
+		reset(); tree(original, 0, 0);
+		images = (struct bootm_headers){ original, sizeof(original) };
+		loader_error = -EIO;
+		emi_transaction.attempted = 1;
+		emi_transaction.slot = i < 2 ? 40 : i == 2 ? 31 : 44;
+		emi_transaction.operation = i == 0 ? 2 : 6;
+		emi_transaction.error = -EIO;
+		emi_transaction.padding.attempted = 1;
+		emi_transaction.padding.step = 10;
+		emi_transaction.reply = 0xfffffffffffffff4ULL;
+		if (i == 1) {
+			emi_transaction.ranges[8].state = TETRIS_MODEM_EMI_FAILED;
+			emi_transaction.ranges[8].step = TETRIS_MODEM_EMI_STEPS;
+		}
+		assert(tetris_modem_brom_only_board(&images) == -EIO);
+		record = fdt_getprop(images.ft_addr, fdt_path_offset(images.ft_addr, "/chosen"),
+			"nothing,modem-brom-emi-report", &length);
+		assert(record && length == 64);
+		assert(!get32(record + 32) && !get32(record + 36));
+		assert(get32(record + 40) == 1 && get32(record + 44) == 10);
+		assert(get32(record + 48) == 0xfffffff4U && get32(record + 52) == 0xffffffffU);
+	}
+	for (i = 12; i <= 13; i++) {
+		reset(); tree(original, 0, 0);
+		images = (struct bootm_headers){ original, sizeof(original) };
+		fault = i; loader_error = -EIO;
+		assert(tetris_modem_brom_only_board(&images) == (i == 12 ? -FDT_ERR_NOSPACE : -EIO));
+		assert(loader_calls == (i == 13));
+		assert((int)property(images.ft_addr, "nothing,modem-brom-publication-error") == -FDT_ERR_NOSPACE);
+	}
 	/* A placeholder-publication failure must prevent the loader from running. */
 	reset(); tree(original, 0, 0);
 	images = (struct bootm_headers){ original, sizeof(original) }; fault = 10;
@@ -278,6 +349,11 @@ int main(void)
 	assert(property(images.ft_addr, "nothing,modem-brom-loaded-observation-valid") == 0);
 	assert(property(images.ft_addr, "nothing,modem-brom-loaded-value") == 0);
 	assert(property64(images.ft_addr, "nothing,modem-brom-loaded-address") == 0);
+	record = fdt_getprop(images.ft_addr, fdt_path_offset(images.ft_addr, "/chosen"),
+		"nothing,modem-brom-emi-report", &length);
+	assert(record && length == 64 && get32(record) == 1);
+	for (i = 4; i < 64; i += 4)
+		assert(!get32(record + i));
 	reset(); tree(original, 0, 0);
 	images = (struct bootm_headers){ original, sizeof(original) };
 	loader_error = -EBUSY; report_error = -EINVAL; fault = 9;
