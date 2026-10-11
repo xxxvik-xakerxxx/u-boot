@@ -173,3 +173,23 @@ each OFF refusal, actual handset refusal, ACK30 success and finite timeouts.
 Only read/timer and first-error-latch boundaries are mocked; no hardware
 mutation, inherited-state cleanup or end-to-end BROM success is established.
 The complete production ARM objects/image still require the normal CI gates.
+
+## cd96ef3 confirmed cold readback
+
+On 2026-10-11 the user completed USB-disconnected physical power-off, a
+ten-second wait and normal power-on before reconnecting USB. The first readback
+has a new Linux boot ID and 34-second uptime, with loader `cd96ef3cb114`.
+The loaded owner again rejects at `TETRIS_MD_LOAD_OFF` with `-EBUSY`;
+report-fetch and publication error are zero. The independent loaded sample is
+`0x1c001e00 = 0x4200000d`: PWR_ON and MD ACK30 are set. Bootstrap fields remain
+unobserved. This is not a partial transition established by ACK31 being clear.
+
+Cold boot does not imply that the preceding firmware hands BL33 an OFF modem.
+This measurement establishes the initial power state, not which preceding
+component enabled it or whether MD firmware is executing. Repeating the same
+power cycle cannot be treated as a fix. A source-backed initial power/quiescence
+owner is required before placed-RAM writes; do not reuse failure cleanup on an
+unowned inherited domain or remove the strict-OFF guard. No Linux MMIO/reset,
+firmware copy, reservation, SMEM write or retry was issued on this boot.
+USB/SSH, all three sensor services, firmware-ready and the 24-entry/mask-31
+sensor inventory recovered automatically; the first kernel journal is retained.
