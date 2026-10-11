@@ -323,7 +323,8 @@ post-write enable/policy checks have NOT yet executed. No modem retry occurred.
 
 SCP preparation returns `-16` on inherited TCM; sensor service is failed and
 SensorProxy inactive. USB/SSH recover. A second failed unit is
-`systemd-coredumpd.service`; its cause is not established by the SCP report.
+`systemd-coredumpd.service`: its journal reports repeated skipped ExecCondition
+starts followed by `start-limit-hit`, not evidence of a kernel/driver crash.
 First report and kernel journal are retained. No sensor module reload/reset
 was attempted. Cold-start display/sensors on `467ab09c` must not be reused as
 warm-start success for this boot.
@@ -350,3 +351,34 @@ reject every other corrupted reply bit and retain enable/policy failure stops.
 The observed endpoint is a synthetic regression vector, not proof that the
 remaining checks will pass or that the modem has reached BROM. CI and a new
 controlled readback are still required; no Linux secure/MMIO probe is used.
+
+## fdb0ee29 First Physical BROM Success
+
+`fdb0ee2994c62b6220e35dd1f75bbeee6e7d6f3a` passed
+[CI 38112558422](https://github.com/xxxvik-xakerxxx/u-boot/actions/runs/38112558422),
+including actual native range transactions and the complete ARM64 image.
+Independent review found no P1/P2 issues. Manifest and checksums match;
+image size 3,307,664 bytes, SHA256
+`3b716e6665ed7752865058d61b5c5c8e3a365278ac88b40799d26fd30cf6f189`.
+It was written only to `lk_a`; synchronous completion and prefix readback match,
+stock `lk_b` is unchanged. The earlier first failure was retained.
+
+One automatic reboot, as requested by the user, reached `fdb0ee2994c6` at
+27.43-second uptime with boot ID `5f35cb0a-39ed-459b-a590-9e30d930cb5f`.
+This is warm-start evidence only. The first report has loader result0,
+report-fetch0, loaded stage11 COMPLETE/error0, hardware stage15 COMPLETE/error0,
+cleanup stage/error0, board stage16 completed/status1 and publication error0.
+The final CCCI/6/7 response has x0=0, x2=x3=`0x100000001`: all four source-
+defined BROM flags equal1. EMI snapshot records attempted1, final slot43,
+error0, range VERIFIED/step20; the complete range/enable/pre/post-policy chain
+passed. Firmware authentication/placement, SMEM, EMI, firmware/bank4 remaps,
+remap lock, power/bus release and BROM verification are now physically observed
+on this unit. No guard reset, retry or permissive policy was introduced.
+
+USB/SSH recovered; the first report and full kernel journal are saved and no
+kernel Oops/BUG/SError/panic/WARNING was found. SCP retains the separate warm-
+TCM `-EBUSY` limitation, so sensors remain failed on this warm boot. A physical
+USB-disconnected cold startup is requested to restore them and check joint
+startup. The CCCI descriptor and Linux consumer are still disabled: this is
+NOT runtime READY, SIM detection, registration, calls, SMS, mobile data or
+confirmed model-wide support. Rootfs/NV/calibration and stock `lk_b` are untouched.
