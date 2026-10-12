@@ -95,8 +95,14 @@ NC/cache publication now keeps the full LMB reservation and plain static
 excluding allocator/direct-map use without claiming them busy for another
 owner. Firmware, service/SIB, tag and final-DT header reservations are unchanged.
 Unrelated reservations, static-node overlap checks and atomic failure cleanup
-remain intact. Native CI and physical resource-claim validation are pending;
-this change neither grants NS permission nor starts Linux CCCI.
+remain intact. Commit ``8d2ccc12e786`` passed CI38235543158. Its verified LK
+image was written only to ``lk_a``; stock ``lk_b`` retained its original hash.
+On r181 boot ``6902543e-e25b-48ce-9dae-84f4dbd07b57``, the previously rejected
+resource module loaded once at uptime200.56s and claimed two exact NC/cache
+extents, excluding CONSYS and unused tails. The duplicate busy child was gone,
+module reference count was1, and USB/sensor/SSH services remained active. The
+user confirmed display/touch/rotation/auto-brightness. This is not a repeated
+cold-start/lifecycle result; no SMEM access, NS grant or Linux CCCI start occurred.
 
 Scope1 explicitly means completed NS BL33 **boot** verification, not Linux NS
 access admission, DMA coherency, an authenticated runtime policy or modem READY.
