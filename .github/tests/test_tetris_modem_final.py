@@ -39,13 +39,28 @@ class FinalMetadataTests(unittest.TestCase):
         self.assertIn('tetris_modem_loaded_encode_tags(tags, TAG_CAPACITY)', source)
         self.assertIn('tetris_modem_loaded_encode_smem_evidence(evidence, sizeof(evidence))', source)
         self.assertIn('"nothing,modem-smem-boot-evidence"', source)
-        self.assertNotIn('"okay"', source)
+        consumer_body = source[source.index('static int consumer('):source.index('static int native_on_supplier(')]
+        self.assertNotIn('"okay"', consumer_body)
         for forbidden in ('readl(', 'writel(', 'arm_smccc', 'ccci_tetris_register', 'pm_runtime'):
             self.assertNotIn(forbidden, source)
         loader = (ROOT / 'board/mediatek/mt6878/tetris_modem_loaded_boot.c').read_text()
         encode = loader[loader.index('int tetris_modem_loaded_encode_tags('):]
         self.assertIn('owner.report.stage != TETRIS_MD_LOAD_COMPLETE', encode)
         self.assertIn('if (owner.report.error)', encode)
+
+    def test_native_on_supplier_is_explicit_and_transactional(self):
+        source = (ROOT / 'board/mediatek/mt6878/tetris_modem_final.c').read_text()
+        self.assertIn('"tetris,modem-native-on-adoption-diagnostic"', source)
+        self.assertIn('"nothing,modem-inherited-on-adoption"', source)
+        self.assertIn('fdt32_to_cpu(*cells) != 1', source)
+        self.assertIn('fdt_next_subnode(fdt, child)', source)
+        publish = source[source.index('int tetris_modem_publish_final('):]
+        activation = publish.index('publish_native_on_supplier(final)')
+        self.assertLess(publish.index('tetris_modem_loaded_encode_smem_evidence('), activation)
+        self.assertLess(publish.index('tetris_modem_loaded_encode_tags('), activation)
+        self.assertLess(publish.index('"ccci,modem_info_v2"'), activation)
+        self.assertLess(activation, publish.index('images->ft_addr = final;'))
+        self.assertNotIn('publish_native_on_supplier(images->ft_addr)', publish)
 
     def test_atomic_cache_cleaned_publication(self):
         source = (ROOT / 'board/mediatek/mt6878/tetris_modem_final.c').read_text()

@@ -19,6 +19,7 @@ struct bootm_headers { void *ft_addr; unsigned long ft_len; };
 static int enabled, fault, alloc_calls, encode_calls, check_calls, frees, flushes;
 static int encode_result, free_error;
 static int evidence_calls;
+static int on_status_writes;
 static void *blocks[2];
 static size_t block_sizes[2];
 static const phys_addr_t addresses[2] = { 0x70000000ULL, 0x70010000ULL };
@@ -107,6 +108,14 @@ static int mock_add(void *fdt, int parent, const char *name)
 }
 static int mock_set(void *fdt, int node, const char *name, const void *data, int size)
 {
+	if (fault == 16 && !strcmp(name, "nothing,modem-inherited-on-adoption"))
+		return -FDT_ERR_NOSPACE;
+	if (size == 5 && !strcmp(name, "status") && !memcmp(data, "okay", 5)) {
+		on_status_writes++;
+		if ((fault == 17 && on_status_writes == 1) ||
+		    (fault == 18 && on_status_writes == 2))
+			return -FDT_ERR_NOSPACE;
+	}
 	if ((fault == 9 && !strcmp(name, "reg")) ||
 	    (fault == 10 && !strcmp(name, "no-map")) ||
 	    (fault == 11 && !strcmp(name, "ccci,modem_info_v2")) ||
@@ -143,6 +152,7 @@ static void reset(void)
 	attempted = first_error = fault = alloc_calls = encode_calls = 0;
 	check_calls = frees = flushes = free_error = 0;
 	evidence_calls = 0;
+	on_status_writes = 0;
 	enabled = 1;
 	encode_result = 4096;
 }
@@ -161,6 +171,27 @@ static int tree(char *fdt)
 	assert(!fdt_setprop_string(fdt, node, "status", "disabled"));
 	return node;
 }
+
+static int on_tree(char *fdt)
+{
+	int node, child, chosen;
+
+	tree(fdt);
+	node = fdt_add_subnode(fdt, 0, "modem-power");
+	assert(node >= 0);
+	assert(!fdt_setprop_string(fdt, node, "compatible", "mediatek,mt6878-modem-power-controller"));
+	assert(!fdt_setprop_string(fdt, node, "status", "disabled"));
+	assert(!fdt_setprop_u32(fdt, node, "#power-domain-cells", 1));
+	child = fdt_add_subnode(fdt, node, "power-domain@0");
+	assert(child >= 0);
+	assert(!fdt_setprop_u32(fdt, child, "reg", 0));
+	assert(!fdt_setprop_string(fdt, child, "status", "disabled"));
+	chosen = fdt_add_subnode(fdt, 0, "chosen");
+	assert(chosen >= 0);
+	assert(!fdt_setprop(fdt, chosen, "tetris,modem-native-on-adoption-diagnostic", NULL, 0));
+	return fdt_node_offset_by_compatible(fdt, -1, "mediatek,mt6878-modem-power-controller");
+}
+
 int main(void)
 {
 	char original[32768], snapshot[32768];
@@ -256,6 +287,68 @@ int main(void)
 	result = tetris_modem_publish_final(&images);
 	assert(result == -FDT_ERR_NOSPACE && frees == 2);
 	assert(tetris_modem_publish_final(&images) == result && alloc_calls == 2);
+	/* Explicit adoption exposes only the native supplier after all fresh data.
+	 * A failure at either status write/marker retains the original disabled DT.
+	 */
+	for (i = 0; i < 4; i++) {
+		reset(); on_tree(original);
+		memcpy(snapshot, original, sizeof(snapshot));
+		images = (struct bootm_headers){ original, sizeof(original) };
+		fault = i ? i + 15 : 0;
+		result = tetris_modem_publish_final(&images);
+		assert(!memcmp(original, snapshot, sizeof(snapshot)));
+		assert((i == 0) == (result == 0));
+		if (i) {
+			assert(result == -FDT_ERR_NOSPACE && images.ft_addr == original);
+			assert(!blocks[0] && !blocks[1] && !flushes && frees == 2);
+		} else {
+			node = fdt_node_offset_by_compatible(images.ft_addr, -1, "mediatek,mt6878-modem-power-controller");
+			assert(!strcmp(fdt_getprop(images.ft_addr, node, "status", &length), "okay"));
+			assert(fdt_getprop(images.ft_addr, node, "nothing,modem-inherited-on-adoption", &length) && !length);
+			node = fdt_first_subnode(images.ft_addr, node);
+			assert(!strcmp(fdt_getprop(images.ft_addr, node, "status", &length), "okay"));
+			node = fdt_node_offset_by_compatible(images.ft_addr, -1, "mediatek,mddriver");
+			assert(!strcmp(fdt_getprop(images.ft_addr, node, "status", &length), "disabled"));
+			assert(evidence_calls == 1 && encode_calls == 1 && flushes == 2);
+		}
+		assert(tetris_modem_publish_final(&images) == (result ? result : -EALREADY));
+	}
+	/* Malformed/duplicate/inherited ownership is refused before allocations. */
+	for (i = 0; i < 9; i++) {
+		int chosen, child;
+
+		reset(); node = on_tree(original);
+		child = fdt_first_subnode(original, node);
+		if (i == 0) assert(!fdt_setprop_string(original, node, "status", "okay"));
+		if (i == 1) assert(!fdt_setprop_u32(original, node, "#power-domain-cells", 0));
+		if (i == 2) assert(!fdt_setprop(original, node, "nothing,modem-inherited-on-adoption", NULL, 0));
+		if (i == 3) assert(!fdt_setprop_u32(original, child, "reg", 1));
+		if (i == 4) assert(!fdt_setprop_string(original, child, "status", "okay"));
+		if (i == 5) assert(fdt_add_subnode(original, node, "power-domain@1") >= 0);
+		if (i == 6) assert(!fdt_del_node(original, node));
+		if (i == 7) {
+			node = fdt_add_subnode(original, 0, "second-supplier");
+			assert(node >= 0);
+			assert(!fdt_setprop_string(original, node, "compatible", "mediatek,mt6878-modem-power-controller"));
+		}
+		if (i == 8) {
+			chosen = fdt_path_offset(original, "/chosen");
+			assert(!fdt_setprop_u32(original, chosen, "tetris,modem-native-on-adoption-diagnostic", 1));
+		}
+		images = (struct bootm_headers){ original, sizeof(original) };
+		memcpy(snapshot, original, sizeof(snapshot));
+		assert(tetris_modem_publish_final(&images) < 0 && !alloc_calls && !encode_calls);
+		assert(images.ft_addr == original && !memcmp(original, snapshot, sizeof(snapshot)));
+	}
+	/* Ordinary metadata publication must not activate the supplier. */
+	reset(); on_tree(original);
+	node = fdt_path_offset(original, "/chosen");
+	assert(!fdt_delprop(original, node, "tetris,modem-native-on-adoption-diagnostic"));
+	images = (struct bootm_headers){ original, sizeof(original) };
+	assert(!tetris_modem_publish_final(&images));
+	node = fdt_node_offset_by_compatible(images.ft_addr, -1, "mediatek,mt6878-modem-power-controller");
+	assert(!strcmp(fdt_getprop(images.ft_addr, node, "status", &length), "disabled"));
+	assert(!fdt_getprop(images.ft_addr, node, "nothing,modem-inherited-on-adoption", &length));
 	reset();
 	puts("Tetris final metadata: actual publisher transactions PASS");
 	return 0;

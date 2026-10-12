@@ -53,6 +53,74 @@ static int consumer(const void *fdt)
 	return node;
 }
 
+/* Input consumers stay disabled throughout BROM. Only the unpublished final
+ * clone may expose the observation-only native supplier, on explicit opt-in.
+ */
+static int native_on_supplier(const void *fdt)
+{
+	const void *property;
+	const fdt32_t *cells;
+	int chosen, node, second, child, length;
+
+	chosen = fdt_path_offset(fdt, "/chosen");
+	if (chosen == -FDT_ERR_NOTFOUND)
+		return 0;
+	if (chosen < 0)
+		return chosen;
+	property = fdt_getprop(fdt, chosen, "tetris,modem-native-on-adoption-diagnostic", &length);
+	if (!property && length == -FDT_ERR_NOTFOUND)
+		return 0;
+	if (!property || length)
+		return property ? -EINVAL : length;
+	node = fdt_node_offset_by_compatible(fdt, -1, "mediatek,mt6878-modem-power-controller");
+	if (node < 0)
+		return node;
+	second = fdt_node_offset_by_compatible(fdt, node, "mediatek,mt6878-modem-power-controller");
+	if (second != -FDT_ERR_NOTFOUND)
+		return second < 0 ? second : -EEXIST;
+	property = fdt_getprop(fdt, node, "status", &length);
+	if (!property || length != 9 || memcmp(property, "disabled", 9))
+		return -EBUSY;
+	property = fdt_getprop(fdt, node, "nothing,modem-inherited-on-adoption", &length);
+	if (property || length != -FDT_ERR_NOTFOUND)
+		return property ? -EEXIST : length;
+	cells = fdt_getprop(fdt, node, "#power-domain-cells", &length);
+	if (!cells || length != 4 || fdt32_to_cpu(*cells) != 1)
+		return -EINVAL;
+	child = fdt_first_subnode(fdt, node);
+	if (child < 0)
+		return child;
+	second = fdt_next_subnode(fdt, child);
+	if (second != -FDT_ERR_NOTFOUND)
+		return second < 0 ? second : -EEXIST;
+	cells = fdt_getprop(fdt, child, "reg", &length);
+	if (!cells || length != 4 || fdt32_to_cpu(*cells))
+		return -EINVAL;
+	property = fdt_getprop(fdt, child, "status", &length);
+	if (!property || length != 9 || memcmp(property, "disabled", 9))
+		return -EBUSY;
+	return node;
+}
+
+static int publish_native_on_supplier(void *fdt)
+{
+	int node, child, ret;
+
+	node = native_on_supplier(fdt);
+	if (node <= 0)
+		return node;
+	ret = fdt_setprop(fdt, node, "nothing,modem-inherited-on-adoption", NULL, 0);
+	if (!ret)
+		ret = fdt_setprop(fdt, node, "status", "okay", 5);
+	if (ret)
+		return ret;
+	/* Adding parent properties shifts the child offset. */
+	child = fdt_first_subnode(fdt, node);
+	if (child < 0)
+		return child;
+	return fdt_setprop(fdt, child, "status", "okay", 5);
+}
+
 static int no_map_reservation(void *fdt, unsigned long long address)
 {
 	fdt64_t reg[2] = { cpu_to_fdt64(address), cpu_to_fdt64(TAG_CAPACITY) };
@@ -103,6 +171,9 @@ int tetris_modem_publish_final(struct bootm_headers *images)
 	if (ret)
 		goto fail;
 	ret = consumer(images->ft_addr);
+	if (ret < 0)
+		goto fail;
+	ret = native_on_supplier(images->ft_addr);
 	if (ret < 0)
 		goto fail;
 	ret = tetris_modem_loaded_encode_smem_evidence(evidence, sizeof(evidence));
@@ -170,6 +241,8 @@ int tetris_modem_publish_final(struct bootm_headers *images)
 			evidence, sizeof(evidence));
 	if (!ret)
 		ret = fdt_setprop(final, node, "ccci,modem_info_v2", descriptor, sizeof(descriptor));
+	if (!ret)
+		ret = publish_native_on_supplier(final);
 	if (!ret)
 		ret = fdt_check_full(final, capacity);
 	if (ret)
