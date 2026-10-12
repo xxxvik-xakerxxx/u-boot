@@ -92,3 +92,10 @@ Endpoint marker bit43 was absent on the tested hardware. The existing isolated
 r181 module passed one import/plan on this loader with USB/sensors still active.
 It did not execute the new Linux decoder or map SMEM. Warm SCP refusal and
 poweroff-under-USB behavior remain unresolved; no lifecycle completion is claimed.
+
+The subsequent isolated consumer passed pmOS CI 38222681473 and one physical
+load on r181. Its actual Linux C decoder retained this record and bound it to
+the imported bank reservations and pure SMEM plan. USB/sensors remained active,
+the 32-MiB transfer hash matched and the user confirmed display/touch/rotation
+and auto-brightness. The module remains a metadata-only experiment: no SMEM
+mapping, Linux NS admission, transport START or SIM/call result is implied.
