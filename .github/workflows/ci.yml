@@ -123,6 +123,8 @@ jobs:
           sh .github/tests/run_tetris_modem_brom_board.sh
           python3 -B .github/tests/test_tetris_modem_final.py
           sh .github/tests/run_tetris_modem_final.sh
+          python3 -B .github/tests/test_tetris_modem_smem_evidence.py
+          sh .github/tests/run_tetris_modem_smem_evidence.sh
           python3 -B .github/tests/test_tetris_modem_linux_policy.py
           sh .github/tests/run_tetris_modem_linux_policy.sh
           python3 -B .github/tests/test_tetris_ufs_identity.py
@@ -199,6 +201,7 @@ jobs:
             board/mediatek/mt6878/tetris_modem_boot_secure.o \
             board/mediatek/mt6878/tetris_modem_loaded_boot.o \
             board/mediatek/mt6878/tetris_modem_ccci_tags.o \
+            board/mediatek/mt6878/tetris_modem_smem_evidence.o \
             board/mediatek/mt6878/tetris_modem_linux_policy.o \
             board/mediatek/mt6878/tetris_modem_final.o \
             board/mediatek/mt6878/tetris_modem_brom_board.o \

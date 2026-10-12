@@ -12,6 +12,7 @@
 #include <linux/string.h>
 #include "tetris_modem_ccci_tags.h"
 #include "tetris_modem_final.h"
+#include "tetris_modem_smem_evidence.h"
 #endif
 
 #define TAG_CAPACITY 65536UL
@@ -44,6 +45,9 @@ static int consumer(const void *fdt)
 	if (property || length != -FDT_ERR_NOTFOUND)
 		return property ? -EEXIST : length;
 	property = fdt_getprop(fdt, node, "ccci,modem_info", &length);
+	if (property || length != -FDT_ERR_NOTFOUND)
+		return property ? -EEXIST : length;
+	property = fdt_getprop(fdt, node, "nothing,modem-smem-boot-evidence", &length);
 	if (property || length != -FDT_ERR_NOTFOUND)
 		return property ? -EEXIST : length;
 	return node;
@@ -81,6 +85,7 @@ int tetris_modem_publish_final(struct bootm_headers *images)
 	phys_addr_t tag_address = 0x80000000ULL, dt_address = 0x80000000ULL;
 	void *tags = NULL, *final = NULL;
 	unsigned char descriptor[32] = { 0 };
+	unsigned char evidence[TETRIS_MODEM_SMEM_EVIDENCE_SIZE];
 	size_t capacity = 0;
 	int node, ret, bytes, cleanup_ret;
 	unsigned int have_tags = 0, have_dt = 0;
@@ -100,6 +105,11 @@ int tetris_modem_publish_final(struct bootm_headers *images)
 	ret = consumer(images->ft_addr);
 	if (ret < 0)
 		goto fail;
+	ret = tetris_modem_loaded_encode_smem_evidence(evidence, sizeof(evidence));
+	if (ret != (int)sizeof(evidence)) {
+		ret = ret < 0 ? ret : -EPROTO;
+		goto fail;
+	}
 	if ((size_t)fdt_totalsize(images->ft_addr) > DT_MAX - 4096) {
 		ret = -E2BIG;
 		goto fail;
@@ -156,7 +166,10 @@ int tetris_modem_publish_final(struct bootm_headers *images)
 	/* err_no/ld_flag/ld_md_errno stay zero; kernel derives MD enable from
 	 * actual successful hdr_tbl_inf. No guessed modem-ready flag here.
 	 */
-	ret = fdt_setprop(final, node, "ccci,modem_info_v2", descriptor, sizeof(descriptor));
+	ret = fdt_setprop(final, node, "nothing,modem-smem-boot-evidence",
+			evidence, sizeof(evidence));
+	if (!ret)
+		ret = fdt_setprop(final, node, "ccci,modem_info_v2", descriptor, sizeof(descriptor));
 	if (!ret)
 		ret = fdt_check_full(final, capacity);
 	if (ret)

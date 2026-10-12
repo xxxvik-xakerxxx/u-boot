@@ -11,6 +11,7 @@
 #include <linux/string.h>
 #include "tetris_modem_loaded_boot.h"
 #include "tetris_modem_ccci_tags.h"
+#include "tetris_modem_smem_evidence.h"
 #include "tetris_modem_final.h"
 #include "tetris_modem_storage.h"
 #include "tetris_modem_reserve.h"
@@ -310,4 +311,13 @@ int tetris_modem_loaded_encode_tags(void *buffer, size_t size)
 		return owner.report.error;
 	return tetris_modem_build_linux_tags(&owner.loaded, owner.check_header,
 		&owner.report, buffer, size);
+}
+
+int tetris_modem_loaded_encode_smem_evidence(void *buffer, size_t size)
+{
+	if (!owner.attempted || owner.report.stage != TETRIS_MD_LOAD_COMPLETE)
+		return -EAGAIN;
+	if (owner.report.error)
+		return owner.report.error;
+	return tetris_modem_build_smem_evidence(&owner.report, buffer, size);
 }

@@ -67,3 +67,21 @@ pending. No new image has been flashed and no physical BROM success is claimed.
 Passing a caller-supplied hash is not runtime evidence.
 The existing stored-ATF profile check is not
 runtime attestation and does not support arbitrary boot chains.
+
+SMEM boot evidence
+------------------
+
+The opt-in final metadata publisher additionally carries
+``nothing,modem-smem-boot-evidence`` on the disabled modem node. This 336-byte
+little-endian v1 record binds the loader's retained NC/cache reservations to
+the actual slot42/43 range, enable and all eight policy readbacks. Both sides
+of the original range transaction must match the independently measured
+preloader profile. No new SMC, MMIO, memory mapping or permission programming
+is performed by encoding or publishing this record. It is atomically committed
+with the existing CCCI descriptor in the cache-clean final DT.
+
+Scope1 explicitly means completed NS BL33 **boot** verification, not Linux NS
+access admission, DMA coherency, an authenticated runtime policy or modem READY.
+Linux must independently establish its runtime scope and retained ownership
+before accessing SMEM. Native encoder/failure/publication tests and the actual
+ARM64 object/full-image build run only in CI; physical execution remains pending.

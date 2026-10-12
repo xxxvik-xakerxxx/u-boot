@@ -25,6 +25,8 @@ class FinalMetadataTests(unittest.TestCase):
         self.assertIn('if (!IS_ENABLED(CONFIG_TETRIS_MODEM_METADATA_HANDOFF))', source)
         self.assertIn('LMB_MEM_ALLOC_MAX, TAG_CAPACITY, &tag_address', source)
         self.assertIn('tetris_modem_loaded_encode_tags(tags, TAG_CAPACITY)', source)
+        self.assertIn('tetris_modem_loaded_encode_smem_evidence(evidence, sizeof(evidence))', source)
+        self.assertIn('"nothing,modem-smem-boot-evidence"', source)
         self.assertNotIn('"okay"', source)
         for forbidden in ('readl(', 'writel(', 'arm_smccc', 'ccci_tetris_register', 'pm_runtime'):
             self.assertNotIn(forbidden, source)

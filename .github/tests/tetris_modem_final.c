@@ -13,10 +13,12 @@ struct bootm_headers { void *ft_addr; unsigned long ft_len; };
 #define LMB_NOOVERWRITE 2
 #define LMB_NONOTIFY 4
 #define TETRIS_MODEM_LINUX_TAG_COUNT 21
+#define TETRIS_MODEM_SMEM_EVIDENCE_SIZE 336
 #define CONFIG_TETRIS_MODEM_METADATA_HANDOFF enabled
 #define IS_ENABLED(x) (x)
 static int enabled, fault, alloc_calls, encode_calls, check_calls, frees, flushes;
 static int encode_result, free_error;
+static int evidence_calls;
 static void *blocks[2];
 static size_t block_sizes[2];
 static const phys_addr_t addresses[2] = { 0x70000000ULL, 0x70010000ULL };
@@ -75,6 +77,15 @@ static int tetris_modem_loaded_encode_tags(void *buffer, size_t size)
 		memset(buffer, 0x5a, encode_result);
 	return encode_result;
 }
+static int tetris_modem_loaded_encode_smem_evidence(void *buffer, size_t size)
+{
+	assert(size == 336);
+	evidence_calls++;
+	if (fault == 13)
+		return -EAGAIN;
+	memset(buffer, 0xa7, size);
+	return fault == 14 ? 335 : 336;
+}
 static int mock_check_full(const void *fdt, size_t size)
 {
 	check_calls++;
@@ -98,7 +109,8 @@ static int mock_set(void *fdt, int node, const char *name, const void *data, int
 {
 	if ((fault == 9 && !strcmp(name, "reg")) ||
 	    (fault == 10 && !strcmp(name, "no-map")) ||
-	    (fault == 11 && !strcmp(name, "ccci,modem_info_v2")))
+	    (fault == 11 && !strcmp(name, "ccci,modem_info_v2")) ||
+	    (fault == 15 && !strcmp(name, "nothing,modem-smem-boot-evidence")))
 		return -FDT_ERR_NOSPACE;
 	return fdt_setprop(fdt, node, name, data, size);
 }
@@ -130,6 +142,7 @@ static void reset(void)
 	}
 	attempted = first_error = fault = alloc_calls = encode_calls = 0;
 	check_calls = frees = flushes = free_error = 0;
+	evidence_calls = 0;
 	enabled = 1;
 	encode_result = 4096;
 }
@@ -156,7 +169,7 @@ int main(void)
 	const unsigned char *descriptor;
 	const fdt64_t *reg;
 	fdt64_t cells[2];
-	for (i = 0; i <= 12; i++) {
+	for (i = 0; i <= 15; i++) {
 		reset(); tree(original); memcpy(snapshot, original, sizeof(snapshot));
 		images = (struct bootm_headers){ original, sizeof(original) };
 		fault = i;
@@ -178,6 +191,10 @@ int main(void)
 		assert(get32(descriptor + 8) == 4096 && get32(descriptor + 16) == 2);
 		assert(get32(descriptor + 20) == 21 && !get32(descriptor + 12));
 		assert(!get32(descriptor + 24) && !get32(descriptor + 28));
+		descriptor = fdt_getprop(images.ft_addr, node, "nothing,modem-smem-boot-evidence", &length);
+		assert(descriptor && length == 336 && evidence_calls == 1);
+		for (int at = 0; at < length; at++)
+			assert(descriptor[at] == 0xa7);
 		assert(!strcmp(fdt_getprop(images.ft_addr, node, "status", &length), "disabled"));
 		node = fdt_path_offset(images.ft_addr, "/reserved-memory/tetris-modem-linux-tags");
 		assert(node >= 0);
