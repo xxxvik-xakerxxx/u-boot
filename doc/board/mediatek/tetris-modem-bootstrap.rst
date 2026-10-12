@@ -59,10 +59,10 @@ Storage authentication, copy, release and cache synchronization share one
 private implementation. Signed footer and loaded metadata remain private
 through BROM; the separate final CCCI publisher cannot accept an external
 success report. Its full 64-KiB tag mapping is reserved and cleaned before an
-atomic switch of the current final DT. That publisher has no board activation
-hook. Exact storage and tag ABI fixtures passed pmOS CI 38027600180; new
-final-publisher fixtures and actual BROM-profile ARM64/full-image CI remain
-pending. No new image has been flashed and no physical BROM success is claimed.
+atomic switch of the current final DT. The separate default-off final metadata
+profile connects publication to the Linux handoff. Physical BROM completion and
+the 21-tag descriptor were observed on r181; one AP-only import and pure SMEM
+plan passed. This remains distinct from protected-memory access or modem READY.
 
 Passing a caller-supplied hash is not runtime evidence.
 The existing stored-ATF profile check is not
@@ -83,5 +83,12 @@ with the existing CCCI descriptor in the cache-clean final DT.
 Scope1 explicitly means completed NS BL33 **boot** verification, not Linux NS
 access admission, DMA coherency, an authenticated runtime policy or modem READY.
 Linux must independently establish its runtime scope and retained ownership
-before accessing SMEM. Native encoder/failure/publication tests and the actual
-ARM64 object/full-image build run only in CI; physical execution remains pending.
+before accessing SMEM. Commit ``e2929baa549f`` passed CI 38217024964, including
+native encoder/failure/publication tests, actual ARM64 objects and the full LK
+image. That CI image was flashed only to ``lk_a``; prefix readback matched its
+SHA256 and stock ``lk_b`` remained unchanged. Linux received the exact 336-byte
+record with both bank reservations, enables, endpoints and profile intact.
+Endpoint marker bit43 was absent on the tested hardware. The existing isolated
+r181 module passed one import/plan on this loader with USB/sensors still active.
+It did not execute the new Linux decoder or map SMEM. Warm SCP refusal and
+poweroff-under-USB behavior remain unresolved; no lifecycle completion is claimed.
