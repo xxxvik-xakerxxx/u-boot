@@ -80,6 +80,24 @@ preloader profile. No new SMC, MMIO, memory mapping or permission programming
 is performed by encoding or publishing this record. It is atomically committed
 with the existing CCCI descriptor in the cache-clean final DT.
 
+Linux resource delegation
+-------------------------
+
+The first resource-only Linux consumer on r181 rejected initialization with
+``EBUSY``: the NC/cache no-map banks also had FDT header memreserve entries.
+Linux d84b264 creates a nonbusy NOMAP parent resource, then marks memblock
+reserved ranges as busy children. Thus the redundant header reservation
+prevented ``request_mem_region()`` from acquiring those kernel-owned extents.
+
+NC/cache publication now keeps the full LMB reservation and plain static
+``reserved-memory/no-map`` node but omits the duplicate header entry. Linux
+``of_reserved_mem.c:early_init_dt_reserve_memory()`` marks no-map pages NOMAP,
+excluding allocator/direct-map use without claiming them busy for another
+owner. Firmware, service/SIB, tag and final-DT header reservations are unchanged.
+Unrelated reservations, static-node overlap checks and atomic failure cleanup
+remain intact. Native CI and physical resource-claim validation are pending;
+this change neither grants NS permission nor starts Linux CCCI.
+
 Scope1 explicitly means completed NS BL33 **boot** verification, not Linux NS
 access admission, DMA coherency, an authenticated runtime policy or modem READY.
 Linux must independently establish its runtime scope and retained ownership

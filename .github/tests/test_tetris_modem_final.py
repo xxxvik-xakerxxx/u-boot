@@ -7,6 +7,18 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class FinalMetadataTests(unittest.TestCase):
+    def test_linux_owned_banks_keep_nomap_without_header_busy_owner(self):
+        source = (ROOT / 'board/mediatek/mt6878/tetris_modem_reserve.c').read_text()
+        self.assertIn('if (!ret && header_reservation)\n\t\tret = fdt_add_mem_rsv', source)
+        self.assertIn('capacity, TETRIS_MODEM_ALIGN,\n\t\t\t     role == 2)', source)
+        self.assertIn('fdt_setprop(copy, node, "no-map", NULL, 0)', source)
+        self.assertIn('LMB_NOMAP | LMB_NOOVERWRITE', source)
+        self.assertLess(source.index('check_tree(copy, name, base, capacity)'),
+                        source.index('fdt_setprop(copy, node, "reg"'))
+        fixture = (ROOT / '.github/tests/tetris_modem_reserve.c').read_text()
+        self.assertIn('start == 0x80000000 && size == 0x10000', fixture)
+        self.assertIn('"other-bank", 0x8000000', fixture)
+
     def test_success_only_hook(self):
         board = (ROOT / 'board/mediatek/mt6878/mt6878_tetris.c').read_text()
         start = board.index('ret = tetris_modem_brom_only_board(images);')

@@ -80,7 +80,7 @@ static int check_tree(const void *fdt, const char *name,
 
 static int reserve_region(void *fdt, const struct tetris_modem_allocator *ops,
 			  const char *name, unsigned long long capacity,
-			  unsigned long long alignment)
+			  unsigned long long alignment, int header_reservation)
 {
 	unsigned long long base = 0;
 	fdt32_t reg[4];
@@ -128,7 +128,13 @@ static int reserve_region(void *fdt, const struct tetris_modem_allocator *ops,
 	ret = fdt_setprop(copy, node, "reg", reg, sizeof(reg));
 	if (!ret)
 		ret = fdt_setprop(copy, node, "no-map", NULL, 0);
-	if (!ret)
+	/* Linux no-map excludes these pages from its allocator/direct map.
+	 * A duplicate header reservation also creates an IORESOURCE_BUSY child,
+	 * preventing the eventual Linux SMEM owner from claiming its own extents.
+	 * Keep LMB ownership and the plain no-map node, but omit that duplicate
+	 * only for the NC/cache banks delegated to the kernel.
+	 */
+	if (!ret && header_reservation)
 		ret = fdt_add_mem_rsv(copy, base, capacity);
 	if (ret)
 		goto release;
@@ -145,7 +151,7 @@ out:
 int tetris_modem_reserve(void *fdt, const struct tetris_modem_allocator *ops)
 {
 	return reserve_region(fdt, ops, "tetris-modem-diagnostic",
-			      TETRIS_MODEM_WINDOW, TETRIS_MODEM_ALIGN);
+			      TETRIS_MODEM_WINDOW, TETRIS_MODEM_ALIGN, 1);
 }
 
 #ifndef TETRIS_MODEM_RESERVE_HOST_TEST
@@ -235,7 +241,7 @@ int tetris_modem_reserve_services(void *fdt, unsigned long long capacity,
 	if (!base)
 		return -EINVAL;
 	ret = reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
-			     capacity, allocation.alignment);
+			     capacity, allocation.alignment, 1);
 	if (!ret)
 		*base = allocation.base;
 	return ret;
@@ -258,7 +264,8 @@ int tetris_modem_reserve_boot_bank(void *fdt, unsigned int role,
 	if (!base || role > 2 || !capacity || capacity > TETRIS_MODEM_LIMIT ||
 	    (capacity & 0xffffULL) || (role < 2 && capacity != 0x8000000ULL))
 		return -EINVAL;
-	ret = reserve_region(fdt, &ops, names[role], capacity, TETRIS_MODEM_ALIGN);
+	ret = reserve_region(fdt, &ops, names[role], capacity, TETRIS_MODEM_ALIGN,
+			     role == 2);
 	if (!ret)
 		*base = allocation.base;
 	return ret;

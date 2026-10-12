@@ -133,13 +133,13 @@ int main(void)
 		memcpy(before, fdt, sizeof(before));
 		allocations = releases = 0;
 		assert(reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
-				      capacity, 0x10000) == -EEXIST);
+				      capacity, 0x10000, 1) == -EEXIST);
 		assert(!memcmp(before, fdt, sizeof(before)));
 		assert(allocations == 1 && releases == 1);
 		allocation = modem_base + TETRIS_MODEM_WINDOW;
 		allocations = releases = 0;
 		assert(!reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
-				       capacity, 0x10000));
+				       capacity, 0x10000, 1));
 		assert(allocations == 1 && !releases);
 		node = fdt_path_offset(fdt,
 			"/reserved-memory/tetris-modem-service-diagnostic");
@@ -153,7 +153,7 @@ int main(void)
 		memcpy(before, fdt, sizeof(before));
 		allocations = releases = 0;
 		assert(reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
-				      capacity, 0x10000) == -EEXIST);
+				      capacity, 0x10000, 1) == -EEXIST);
 		assert(!allocations && !releases);
 		assert(!memcmp(before, fdt, sizeof(before)));
 	}
@@ -166,7 +166,7 @@ int main(void)
 		fresh(fdt);
 		memcpy(before, fdt, sizeof(before));
 		assert(reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
-				      capacity, alignment) == -EINVAL);
+				      capacity, alignment, 1) == -EINVAL);
 		assert(!allocations && !releases);
 		assert(!memcmp(before, fdt, sizeof(before)));
 	}
@@ -183,7 +183,7 @@ int main(void)
 		fdt_set_totalsize(fdt, fdt_totalsize(fdt) + i);
 		memcpy(before, fdt, sizeof(before));
 		ret = reserve_region(fdt, &ops, "tetris-modem-service-diagnostic",
-				     0x2800000, 0x10000);
+				     0x2800000, 0x10000, 1);
 		assert(allocations == 1);
 		if (ret) {
 			assert(releases == 1);
@@ -191,6 +191,35 @@ int main(void)
 		} else {
 			assert(!releases);
 		}
+	}
+	/* Kernel-owned banks remain NOMAP without a duplicate header BUSY owner.
+	 * Existing unrelated header reservations and node-conflict checks survive.
+	 */
+	for (i = 0; i < 2; i++) {
+		const char *name = i ? "tetris-modem-boot-cache" : "tetris-modem-boot-nc";
+		unsigned char before[4096];
+
+		parent = fresh(fdt);
+		assert(!fdt_add_mem_rsv(fdt, 0x80000000, 0x10000));
+		assert(!reserve_region(fdt, &ops, name, 0x8000000,
+				      TETRIS_MODEM_ALIGN, 0));
+		assert(allocations == 1 && !releases);
+		parent = fdt_path_offset(fdt, "/reserved-memory");
+		node = fdt_subnode_offset(fdt, parent, name);
+		assert(node >= 0);
+		reg = fdt_getprop(fdt, node, "reg", &len);
+		assert(reg && len == 16 && read_pair(reg) == allocation);
+		assert(read_pair(reg + 2) == 0x8000000);
+		assert(fdt_getprop(fdt, node, "no-map", &len) && !len);
+		assert(fdt_num_mem_rsv(fdt) == 1);
+		assert(!fdt_get_mem_rsv(fdt, 0, &start, &size));
+		assert(start == 0x80000000 && size == 0x10000);
+		memcpy(before, fdt, sizeof(before));
+		allocations = releases = 0;
+		assert(reserve_region(fdt, &ops, "other-bank", 0x8000000,
+				      TETRIS_MODEM_ALIGN, 0) == -EEXIST);
+		assert(allocations == 1 && releases == 1);
+		assert(!memcmp(before, fdt, sizeof(before)));
 	}
 	puts("modem reservation: allocation, conflicts and atomic DT publication passed");
 	return 0;
