@@ -123,3 +123,13 @@ the imported bank reservations and pure SMEM plan. USB/sensors remained active,
 the 32-MiB transfer hash matched and the user confirmed display/touch/rotation
 and auto-brightness. The module remains a metadata-only experiment: no SMEM
 mapping, Linux NS admission, transport START or SIM/call result is implied.
+
+The separate exact-r181 initial-read module from pmOS CI38240582807 was tested
+once after restoring the 8d2ccc12 modem/SCP profile. On fresh boot
+``71cf27cd-4289-49f1-b79d-e65eb131fef8`` at uptime806.70s it validated the
+retained owner, claims, boot NC range/policy and actual EL1, read one 32-bit NC
+word and immediately unmapped the page. The result was zero, without a reboot,
+new abort/Oops, failed units or loss of USB/sensors/SSH. Both exact iomem claims
+remain pinned until reboot. No write, cache/NV read, START or transport was run.
+This is a completed bounded initial read, not an immutable runtime permission,
+proof against hardware zero-on-deny behavior, modem READY or SIM registration.
