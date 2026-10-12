@@ -53,6 +53,24 @@ static int consumer(const void *fdt)
 	return node;
 }
 
+static int native_first_off_requested(const void *fdt)
+{
+	const void *property;
+	int chosen, length;
+
+	chosen = fdt_path_offset(fdt, "/chosen");
+	if (chosen == -FDT_ERR_NOTFOUND)
+		return 0;
+	if (chosen < 0)
+		return chosen;
+	property = fdt_getprop(fdt, chosen, "tetris,modem-first-off-diagnostic", &length);
+	if (!property && length == -FDT_ERR_NOTFOUND)
+		return 0;
+	if (!property || length)
+		return property ? -EINVAL : length;
+	return 1;
+}
+
 /* Input consumers stay disabled throughout BROM. Only the unpublished final
  * clone may expose the observation-only native supplier, on explicit opt-in.
  */
@@ -60,8 +78,11 @@ static int native_on_supplier(const void *fdt)
 {
 	const void *property;
 	const fdt32_t *cells;
-	int chosen, node, second, child, length;
+	int chosen, node, second, child, length, first_off;
 
+	first_off = native_first_off_requested(fdt);
+	if (first_off < 0)
+		return first_off;
 	chosen = fdt_path_offset(fdt, "/chosen");
 	if (chosen == -FDT_ERR_NOTFOUND)
 		return 0;
@@ -69,7 +90,7 @@ static int native_on_supplier(const void *fdt)
 		return chosen;
 	property = fdt_getprop(fdt, chosen, "tetris,modem-native-on-adoption-diagnostic", &length);
 	if (!property && length == -FDT_ERR_NOTFOUND)
-		return 0;
+		return first_off ? -EINVAL : 0;
 	if (!property || length)
 		return property ? -EINVAL : length;
 	node = fdt_node_offset_by_compatible(fdt, -1, "mediatek,mt6878-modem-power-controller");
@@ -82,6 +103,9 @@ static int native_on_supplier(const void *fdt)
 	if (!property || length != 9 || memcmp(property, "disabled", 9))
 		return -EBUSY;
 	property = fdt_getprop(fdt, node, "nothing,modem-inherited-on-adoption", &length);
+	if (property || length != -FDT_ERR_NOTFOUND)
+		return property ? -EEXIST : length;
+	property = fdt_getprop(fdt, node, "nothing,modem-first-off-diagnostic", &length);
 	if (property || length != -FDT_ERR_NOTFOUND)
 		return property ? -EEXIST : length;
 	cells = fdt_getprop(fdt, node, "#power-domain-cells", &length);
@@ -104,12 +128,17 @@ static int native_on_supplier(const void *fdt)
 
 static int publish_native_on_supplier(void *fdt)
 {
-	int node, child, ret;
+	int node, child, ret, first_off;
 
 	node = native_on_supplier(fdt);
 	if (node <= 0)
 		return node;
+	first_off = native_first_off_requested(fdt);
+	if (first_off < 0)
+		return first_off;
 	ret = fdt_setprop(fdt, node, "nothing,modem-inherited-on-adoption", NULL, 0);
+	if (!ret && first_off)
+		ret = fdt_setprop(fdt, node, "nothing,modem-first-off-diagnostic", NULL, 0);
 	if (!ret)
 		ret = fdt_setprop(fdt, node, "status", "okay", 5);
 	if (ret)

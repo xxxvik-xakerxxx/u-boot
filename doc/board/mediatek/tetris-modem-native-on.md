@@ -29,3 +29,20 @@ The paired Linux observation/attach implementation and its DT are staging
 work. Do not advertise or install this path as operational radio support.
 Native first shutdown, inhibited restart, HIF transport, SIM service and
 cellular audio still require implementation and hardware validation.
+
+## Paired First-OFF Intent
+
+An additional empty `/chosen/tetris,modem-first-off-diagnostic` requests the
+paired Linux native-MTCMOS first-OFF experiment. It requires the ON-adoption
+intent above. Orphan or nonempty intent and any inherited supplier
+`nothing,modem-first-off-diagnostic` record are rejected before allocation.
+Only the fresh successful final clone gains that empty supplier record; a
+marker/evidence write failure preserves the original DT and first error.
+
+U-Boot still leaves MD ON and performs no new hardware operation. The paired
+Linux implementation must independently validate the actual handoff and ON
+readbacks and require its persistent no-idle/no-sleep diagnostic configuration
+before any mutation. Neither marker is an authorization or readiness proof.
+Native MTCMOS OFF is not vendor rails/TOP/FLIGHT shutdown, restart or SIM support.
+Do not use this intent with the ordinary shipping kernel or advertise the
+diagnostic no-sleep configuration as a battery-optimized daily-driver profile.

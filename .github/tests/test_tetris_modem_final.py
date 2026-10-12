@@ -75,6 +75,17 @@ class FinalMetadataTests(unittest.TestCase):
         runner = (ROOT / '.github/tests/run_tetris_modem_final.sh').read_text()
         self.assertLess(runner.index('"${GITHUB_ACTIONS:-}"'), runner.index('cc=${HOSTCC:-cc}'))
 
+    def test_first_off_intent_requires_fresh_paired_publication(self):
+        source = (ROOT / 'board/mediatek/mt6878/tetris_modem_final.c').read_text()
+        self.assertIn('"tetris,modem-first-off-diagnostic"', source)
+        self.assertIn('return first_off ? -EINVAL : 0;', source)
+        self.assertIn('"nothing,modem-first-off-diagnostic"', source)
+        publish = source[source.index('static int publish_native_on_supplier('):]
+        self.assertLess(publish.index('if (!ret && first_off)'), publish.index('"status", "okay"'))
+        fixture = (ROOT / '.github/tests/tetris_modem_final.c').read_text()
+        self.assertIn('fault = 19;', fixture)
+        self.assertIn('if (i == 5) fault = 15;', fixture)
+
 
 if __name__ == '__main__':
     unittest.main()

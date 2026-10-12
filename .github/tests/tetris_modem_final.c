@@ -110,6 +110,8 @@ static int mock_set(void *fdt, int node, const char *name, const void *data, int
 {
 	if (fault == 16 && !strcmp(name, "nothing,modem-inherited-on-adoption"))
 		return -FDT_ERR_NOSPACE;
+	if (fault == 19 && !strcmp(name, "nothing,modem-first-off-diagnostic"))
+		return -FDT_ERR_NOSPACE;
 	if (size == 5 && !strcmp(name, "status") && !memcmp(data, "okay", 5)) {
 		on_status_writes++;
 		if ((fault == 17 && on_status_writes == 1) ||
@@ -339,6 +341,37 @@ int main(void)
 		memcpy(snapshot, original, sizeof(snapshot));
 		assert(tetris_modem_publish_final(&images) < 0 && !alloc_calls && !encode_calls);
 		assert(images.ft_addr == original && !memcmp(original, snapshot, sizeof(snapshot)));
+	}
+	/* FIRST-OFF intent is paired, empty, fresh-only and failure atomic. */
+	for (i = 0; i < 6; i++) {
+		int chosen;
+
+		reset(); node = on_tree(original);
+		chosen = fdt_path_offset(original, "/chosen");
+		assert(!fdt_setprop(original, chosen, "tetris,modem-first-off-diagnostic", NULL, 0));
+		if (i == 1) assert(!fdt_delprop(original, chosen, "tetris,modem-native-on-adoption-diagnostic"));
+		if (i == 2) assert(!fdt_setprop_u32(original, chosen, "tetris,modem-first-off-diagnostic", 1));
+		node = fdt_node_offset_by_compatible(original, -1, "mediatek,mt6878-modem-power-controller");
+		if (i == 3) assert(!fdt_setprop(original, node, "nothing,modem-first-off-diagnostic", NULL, 0));
+		if (i == 4) fault = 19;
+		if (i == 5) fault = 15;
+		memcpy(snapshot, original, sizeof(snapshot));
+		images = (struct bootm_headers){ original, sizeof(original) };
+		result = tetris_modem_publish_final(&images);
+		assert(!memcmp(original, snapshot, sizeof(snapshot)));
+		if (i) {
+			assert(result < 0 && images.ft_addr == original);
+			assert(!flushes && !blocks[0] && !blocks[1]);
+			if (i < 4) assert(!alloc_calls && !encode_calls);
+		} else {
+			node = fdt_node_offset_by_compatible(images.ft_addr, -1, "mediatek,mt6878-modem-power-controller");
+			assert(fdt_getprop(images.ft_addr, node, "nothing,modem-first-off-diagnostic", &length) && !length);
+			assert(fdt_getprop(images.ft_addr, node, "nothing,modem-inherited-on-adoption", &length) && !length);
+			node = fdt_node_offset_by_compatible(images.ft_addr, -1, "mediatek,mddriver");
+			assert(!strcmp(fdt_getprop(images.ft_addr, node, "status", &length), "disabled"));
+			assert(evidence_calls == 1 && encode_calls == 1 && flushes == 2);
+		}
+		assert(tetris_modem_publish_final(&images) == (result ? result : -EALREADY));
 	}
 	/* Ordinary metadata publication must not activate the supplier. */
 	reset(); on_tree(original);
