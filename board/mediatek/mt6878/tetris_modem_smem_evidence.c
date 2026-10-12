@@ -93,7 +93,8 @@ int tetris_modem_build_smem_evidence(const struct tetris_modem_loaded_report *re
 		    transaction->slot != row->slot ||
 		    transaction->reply[0] || transaction->reply[9] || transaction->reply[12] != 1 ||
 		    transaction->reply[10] != range.start_readback ||
-		    (transaction->reply[11] & ~TETRIS_MODEM_EMI_END_MARKER) != range.end_readback)
+		    (transaction->reply[11] & ~TETRIS_MODEM_EMI_END_MARKER) !=
+			(range.end_readback & ~TETRIS_MODEM_EMI_END_MARKER))
 			return -EBADMSG;
 		for (group = 0; group < TETRIS_MODEM_EMI_POLICY_WORDS; group++) {
 			if (row->policy[group] != policy[group] ||

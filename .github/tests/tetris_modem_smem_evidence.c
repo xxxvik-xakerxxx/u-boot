@@ -85,6 +85,12 @@ int main(void)
 		for (group = 0; group < 8; group++)
 			assert(get64(p + 64 + group * 8) == row->policy[group]);
 	}
+	for (bank = 0; bank < 2; bank++) {
+		valid(&report);
+		report.hardware.emi.ranges[10 + bank].reply[11] &= ~TETRIS_MODEM_EMI_END_MARKER;
+		assert(tetris_modem_build_smem_evidence(&report, output, sizeof(output)) == 336);
+		assert(!(get64(output + 80 + bank * 128 + 48) & TETRIS_MODEM_EMI_END_MARKER));
+	}
 	for (which = 0; which < 29; which++) {
 		valid(&report);
 		memset(output, 0xa5, sizeof(output));
