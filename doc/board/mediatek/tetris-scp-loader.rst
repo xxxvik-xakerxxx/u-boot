@@ -183,6 +183,30 @@ registration or reset release is performed. A failure is not retried.
 the outcome; the plaintext region-info size is published only after both
 component hashes pass.
 
+Late Linux DT capacity
+~~~~~~~~~~~~~~~~~~~~~
+
+On the first r188 cold boot, the installed ``322cf227`` loader published SCP
+secure state 3 but omitted secure operation/error and prepare stage/error.
+The sensor service correctly rejected the incomplete report. Wi-Fi scanned
+63 networks; display/touch and USB/SSH remained usable. This is distinct from
+the r184 PM_SLEEP wakeup-source regression.
+
+``image_setup_libfdt()`` shrinks and re-reserves the relocated DT before
+``board_prep_linux()``. The final modem DT has its own later expansion, so
+free space measured in Linux does not establish capacity during SCP setup.
+The board now clones the bounded original tree into an LMB-owned allocation
+with 16 KiB additional space before any SCP observation/preparation. The clone
+is validated and self-reserved before committing its pointer; allocation or
+validation failure refuses boot before late hardware operations. Original
+reservations remain owned. The new allocation is checked against both actual
+LMB reservation and DRAM coverage before mapping, including the allocator's
+zero-with-unchanged-address failure case. No secure-state or preparation
+result is invented.
+CI uses real libfdt to reproduce packed-tree NOSPACE and exercise allocation,
+mapping, clone, reservation and validation failures. Hardware recovery remains
+unverified until the corrected loader is installed and cold booted.
+
 CI ``35701102610`` built commit ``8066a9a1ee`` with this option enabled.
 LK image SHA256:
 ``691164969062e9728178de4a8da7c9e7ee48b5185908def7e1f1bb150596a22d``.

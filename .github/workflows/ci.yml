@@ -117,6 +117,8 @@ jobs:
           sh .github/tests/run_tetris_scp_crypto.sh
           sh .github/tests/run_tetris_scp_tcm.sh
           sh .github/tests/run_tetris_scp_secure.sh
+          python3 -B .github/tests/test_tetris_linux_fdt_prepare.py
+          sh .github/tests/run_tetris_linux_fdt_prepare.sh
           sh .github/tests/run_tetris_modem_reserve.sh
           sh .github/tests/run_tetris_modem_observe.sh
           python3 -B .github/tests/test_tetris_modem_brom_board.py
