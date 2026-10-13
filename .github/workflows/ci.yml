@@ -181,7 +181,9 @@ jobs:
           make O=build-initramfs-only olddefconfig
           make O=build-initramfs-only -j"$(nproc)" \
             CROSS_COMPILE=aarch64-linux-gnu- tools
-          make O=build-initramfs-only -j"$(nproc)" \
+          # Each single-object goal recursively reads the same directory's .cmd
+          # files. Serialize these goals to avoid reading another unfinished file.
+          make O=build-initramfs-only -j1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             arch/arm/lib/save_prev_bl_data.o \
             common/board_f.o \

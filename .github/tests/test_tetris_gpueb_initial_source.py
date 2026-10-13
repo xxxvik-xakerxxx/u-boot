@@ -19,6 +19,15 @@ HERE = Path(__file__).resolve().parent
 
 
 class InitialSource(unittest.TestCase):
+    def test_single_object_ci_goals_do_not_race_shared_dependency_files(self):
+        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        self.assertIn('make O=build-initramfs-only -j1', workflow)
+        objects = workflow.split('make O=build-initramfs-only -j1', 1)[1].split('- name:', 1)[0]
+        self.assertIn('arch/arm/lib/save_prev_bl_data.o', objects)
+        self.assertIn('board/mediatek/mt6878/mt6878_tetris.o', objects)
+        self.assertIn('make O=build-initramfs-only -j"$(nproc)" \\\n'
+                      '            CROSS_COMPILE=aarch64-linux-gnu- tools', workflow)
+
     @classmethod
     def setUpClass(cls):
         cls.source = extractor.SOURCE.read_text()
