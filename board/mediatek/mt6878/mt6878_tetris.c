@@ -1243,12 +1243,135 @@ struct tetris_emimpu_region {
 	const char *name;
 };
 
+#if CONFIG_IS_ENABLED(TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC) || \
+	CONFIG_IS_ENABLED(TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC)
+/* Stage1 means this boot's post-relocation startup read, never power readiness. */
+static u32 gpueb_initial_raw;
+static u32 gpueb_initial_stage;
+static int gpueb_initial_error = -ENODATA;
+
+static const char * const gpueb_initial_properties[] = {
+	"nothing,gpueb-initial-report-version",
+	"nothing,gpueb-initial-report-stage",
+	"nothing,gpueb-initial-report-error",
+	"nothing,gpueb-initial-spm-raw",
+	"nothing,gpueb-initial-spm-ack",
+	"nothing,gpueb-initial-spm-pdn-ack12",
+	"nothing,gpueb-initial-spm-sleep-b-ack13",
+};
+
+static void gpueb_initial_power_capture(void)
+{
+	if (gpueb_initial_stage)
+		return;
+	/* Existing device mapping. A synchronous MMIO fault cannot be caught here. */
+	gpueb_initial_raw = readl((const volatile void *)0x1c001eb4UL);
+	gpueb_initial_error = 0;
+	gpueb_initial_stage = 1;
+}
+
+static int gpueb_initial_clear(void *fdt, int node)
+{
+	size_t i;
+	int ret;
+
+	/* Remove version first; stale/partial imported fields must not look current. */
+	for (i = 0; i < ARRAY_SIZE(gpueb_initial_properties); i++) {
+		ret = fdt_delprop(fdt, node, gpueb_initial_properties[i]);
+		if (ret && ret != -FDT_ERR_NOTFOUND)
+			return ret;
+	}
+	return 0;
+}
+
+static int gpueb_initial_write(void *fdt, int node, u32 stage, int error)
+{
+	u32 raw = gpueb_initial_raw;
+	int ret;
+
+	ret = gpueb_initial_clear(fdt, node);
+	if (ret)
+		return ret;
+	ret = fdt_setprop_u32(fdt, node, gpueb_initial_properties[1], stage);
+	if (!ret)
+		ret = fdt_setprop_u32(fdt, node, gpueb_initial_properties[2], (u32)error);
+	if (!ret && stage == 1 && !error) {
+		ret = fdt_setprop_u32(fdt, node, gpueb_initial_properties[3], raw);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, gpueb_initial_properties[4], (raw >> 30) & 3U);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, gpueb_initial_properties[5], (raw >> 12) & 1U);
+		if (!ret)
+			ret = fdt_setprop_u32(fdt, node, gpueb_initial_properties[6], (raw >> 13) & 1U);
+	}
+	/* Version is last, including on the minimal real-error fallback. */
+	if (!ret)
+		ret = fdt_setprop_u32(fdt, node, gpueb_initial_properties[0], 1);
+	return ret;
+}
+
+static int gpueb_initial_report_publish(struct bootm_headers *images)
+{
+	struct bootm_headers candidate = *images;
+	void *final;
+	phys_addr_t address;
+	size_t capacity;
+	int ret, node, published;
+
+	/* Same bounded owned-DRAM clone as the authenticated GPUEB final publisher. */
+	ret = tetris_linux_fdt_prepare(&candidate);
+	if (ret)
+		goto failure;
+	final = candidate.ft_addr;
+	capacity = candidate.ft_len;
+	address = map_to_sysmem(final);
+	node = fdt_path_offset(final, "/chosen");
+	if (node == -FDT_ERR_NOTFOUND)
+		node = fdt_add_subnode(final, 0, "chosen");
+	ret = node < 0 ? node : gpueb_initial_write(final, node,
+						 gpueb_initial_stage, gpueb_initial_error);
+	if (!ret)
+		ret = fdt_check_full(final, capacity);
+	if (ret) {
+		unmap_sysmem(final);
+		lmb_free(address, capacity, LMB_NOOVERWRITE | LMB_NONOTIFY);
+		goto failure;
+	}
+	flush_dcache_range((unsigned long)final, (unsigned long)final + capacity);
+	*images = candidate;
+	return 0;
+failure:
+	/* Caller already owns its bounded clone. Publish the actual first error,
+	 * without raw/ACK fields or a claimed startup sample. No boot-path grant.
+	 */
+	published = tetris_linux_fdt_sync(images);
+	if (!published) {
+		node = fdt_path_offset(images->ft_addr, "/chosen");
+		if (node == -FDT_ERR_NOTFOUND)
+			node = fdt_add_subnode(images->ft_addr, 0, "chosen");
+		published = node < 0 ? node : gpueb_initial_write(images->ft_addr,
+								node, 0, ret);
+		if (!published)
+			published = fdt_check_full(images->ft_addr, images->ft_len);
+		flush_dcache_range((unsigned long)images->ft_addr,
+				   (unsigned long)images->ft_addr + images->ft_len);
+	}
+	if (published)
+		printf("Tetris: GPUEB initial report publication error=%d first=%d\n", published, ret);
+	return ret;
+}
+#endif
+
 int board_late_init(void)
 {
 	void __iomem *reboot_mode = (void __iomem *)(TETRIS_WDT_BASE +
 						      TETRIS_WDT_NONRST_REG2);
 	u32 mode = readl(reboot_mode) & TETRIS_REBOOT_MODE_MASK;
 
+#if CONFIG_IS_ENABLED(TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC) || \
+	CONFIG_IS_ENABLED(TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC)
+	gpueb_initial_power_capture();
+#endif
 	if (mode != TETRIS_REBOOT_MODE_BOOTLOADER)
 		return 0;
 
@@ -1749,6 +1872,12 @@ void board_prep_linux(struct bootm_headers *images)
 	ret = tetris_linux_fdt_prepare(images);
 	if (ret)
 		panic("Tetris: refusing Linux preparation without owned DT space: %d\n", ret);
+#if CONFIG_IS_ENABLED(TETRIS_GPUEB_FLAT_RETENTION_DIAGNOSTIC) || \
+	CONFIG_IS_ENABLED(TETRIS_GPUEB_TRANSFORM_DIAGNOSTIC)
+	ret = gpueb_initial_report_publish(images);
+	if (ret)
+		printf("Tetris: GPUEB initial report error=%d (observation only)\n", ret);
+#endif
 	fdt = images->ft_addr;
 
 	if (IS_ENABLED(CONFIG_TETRIS_SCP_HANDOFF_INVENTORY)) {
