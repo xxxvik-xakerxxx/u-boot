@@ -376,8 +376,10 @@ jobs:
                   raise SystemExit(f"missing direct boot record: {record}")
           if 'defer conninfra RO protection' in handler:
               raise SystemExit("conninfra RO EMI MPU protection is still deferred")
-          if 'flush_dcache_range' in handler:
-              raise SystemExit("unvalidated conninfra cache maintenance is enabled")
+          import sys
+          sys.path.insert(0, ".github/tests")
+          from extract_tetris_gpueb_initial import check_cache_scope
+          check_cache_scope(handler)
 
           board_dts = Path("arch/arm/dts/mt6878-nothing-tetris.dts").read_text()
           if "pinmux = <PINMUX_GPIO54__FUNC_GPIO54>;" not in board_dts:

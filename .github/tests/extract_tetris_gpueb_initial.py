@@ -58,6 +58,18 @@ def ci_guard():
             'CI-only extraction: CI=true and GITHUB_ACTIONS=true required before compilation')
 
 
+def check_cache_scope(source):
+    body = extract(source)
+    calls = re.findall(r'\bflush_dcache_range\s*\((.*?)\);', body, re.S)
+    calls = [re.sub(r'\s+', '', call) for call in calls]
+    require(calls == [
+        '(unsignedlong)final,(unsignedlong)final+capacity',
+        '(unsignedlong)images->ft_addr,(unsignedlong)images->ft_addr+images->ft_len',
+    ], 'initial report cache operation is not an owned DT range')
+    require('flush_dcache_range' not in source.replace(body, '', 1),
+            'unvalidated cache maintenance outside the DT report is enabled')
+
+
 def emit(source, output):
     ci_guard()
     body = extract(source.read_text())

@@ -19,6 +19,15 @@ HERE = Path(__file__).resolve().parent
 
 
 class InitialSource(unittest.TestCase):
+    def test_cache_operations_are_only_the_actual_owned_dt_ranges(self):
+        source = extractor.SOURCE.read_text()
+        extractor.check_cache_scope(source)
+        with self.assertRaisesRegex(ValueError, 'outside the DT report'):
+            extractor.check_cache_scope(source + '\nvoid other(void) { flush_dcache_range(1, 2); }\n')
+        with self.assertRaisesRegex(ValueError, 'not an owned DT range'):
+            extractor.check_cache_scope(source.replace('(unsigned long)final + capacity',
+                                                   '(unsigned long)final + 0x100000', 1))
+
     def test_single_object_ci_goals_do_not_race_shared_dependency_files(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         self.assertIn('make O=build-initramfs-only -j1', workflow)
