@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0+
+#ifndef TETRIS_GPUEB_FLAT_HOST_TEST
 #include <malloc.h>
 #include <mapmem.h>
 #include <stdio.h>
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/libfdt.h>
+#endif
 #include "tetris_gpueb_flat_publish.h"
 
 /* Kept through boot: no second publication or post-transfer discard API. */
@@ -123,8 +125,16 @@ static int build(void *fdt, const struct tetris_gpueb_flat_info *info)
 		return consumer;
 	SET(fdt_setprop_string(fdt, consumer, "compatible", "nothing,tetris-gpueb-flat-analysis-v1"));
 	SET(fdt_setprop_u32(fdt, consumer, "memory-region", phandle));
+	SET(fdt_setprop_u32(fdt, consumer, "nothing,handoff-version", info->handoff_version));
+	SET(fdt_setprop_u32(fdt, consumer, "nothing,payload-offset", info->payload_offset));
 	SET(fdt_setprop_u32(fdt, consumer, "nothing,authenticated-bytes", info->authenticated_bytes));
+	SET(fdt_setprop_u32(fdt, consumer, "nothing,sram-offset", info->sram_offset));
+	SET(fdt_setprop_u32(fdt, consumer, "nothing,profile-id", info->profile_id));
 	SET(fdt_setprop(fdt, consumer, "nothing,plaintext-sha256", info->plaintext_sha256, 32));
+	SET(fdt_setprop(fdt, consumer, "nothing,primary-header-sha256", info->primary_header_sha256, 32));
+	SET(fdt_setprop(fdt, consumer, "nothing,ciphertext-sha256", info->ciphertext_sha256, 32));
+	SET(fdt_setprop(fdt, consumer, "nothing,leaf-certificate-sha256", info->leaf_certificate_sha256, 32));
+	SET(fdt_setprop(fdt, consumer, "nothing,container-sha256", info->container_sha256, 32));
 #undef SET
 	return fdt_check_full(fdt, fdt_totalsize(fdt));
 }
@@ -142,7 +152,7 @@ int tetris_gpueb_flat_publish(struct tetris_gpueb_flat **image,
 		return -EALREADY;
 	ret = tetris_gpueb_flat_describe(*image, &info);
 	if (ret)
-		return ret;
+		goto abort;
 	if (!fdt || capacity < sizeof(struct fdt_header) || capacity > 0x200000 ||
 	    intersects(info.reserved_base, info.reserved_bytes, map_to_sysmem(fdt), capacity)) {
 		ret = -EINVAL;

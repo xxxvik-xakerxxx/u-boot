@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0+
+#ifndef TETRIS_GPUEB_FLAT_HOST_TEST
 #include <lmb.h>
 #include <malloc.h>
 #include <mapmem.h>
 #include <linux/errno.h>
 #include <linux/string.h>
+#endif
 #include "tetris_gpueb_layout.h"
 #include "tetris_gpueb_flat.h"
 
@@ -59,7 +61,7 @@ static int reviewed(const u8 digest[32])
 
 	for (i = 0; i < sizeof(profiles) / sizeof(profiles[0]); i++)
 		if (!memcmp(digest, profiles[i], 32))
-			return 1;
+			return i + TETRIS_GPUEB_FLAT_PROFILE_PHONE_A;
 	return 0;
 }
 
@@ -77,7 +79,7 @@ int tetris_gpueb_flat_retain(struct tetris_scp_crypto *crypto,
 	const void *protected[7];
 	size_t lengths[7];
 	unsigned int i;
-	int ret, writable = 0;
+	int ret, profile, writable = 0;
 
 	if (!crypto || !security || !container || !root_pin || !result ||
 	    !bytes || bytes > TETRIS_GPUEB_MAX_CONTAINER ||
@@ -114,7 +116,8 @@ int tetris_gpueb_flat_retain(struct tetris_scp_crypto *crypto,
 		root_pin, security, &metadata);
 	if (ret)
 		goto out;
-	if (!reviewed(metadata.plaintext)) {
+	profile = reviewed(metadata.plaintext);
+	if (!profile) {
 		ret = -ENOEXEC;
 		goto out;
 	}
@@ -145,6 +148,20 @@ int tetris_gpueb_flat_retain(struct tetris_scp_crypto *crypto,
 					  RESERVE_BYTES, RESERVE_BYTES);
 	if (ret)
 		goto unmap;
+	if (ops->physical(image->mapping) != base) {
+		ret = -ERANGE;
+		goto unmap;
+	}
+	/* Capture signed-member provenance before ciphertext is transformed.
+	 * The full container hash identifies framing, not authenticated extra bytes.
+	 */
+	security->sha256(p + layout.sections[0].header_offset, 512,
+			 image->info.primary_header_sha256);
+	security->sha256(p + layout.sections[2].payload_offset,
+			 layout.sections[2].payload_size,
+			 image->info.leaf_certificate_sha256);
+	security->sha256(container, bytes, image->info.container_sha256);
+	memcpy(image->info.ciphertext_sha256, metadata.ciphertext, 32);
 	writable = 1;
 	erase(image->mapping, RESERVE_BYTES);
 	memcpy(image->mapping, p + layout.sections[0].payload_offset, FLAT_BYTES);
@@ -156,7 +173,10 @@ int tetris_gpueb_flat_retain(struct tetris_scp_crypto *crypto,
 	image->ops = ops;
 	image->info.reserved_base = base;
 	image->info.reserved_bytes = RESERVE_BYTES;
+	image->info.handoff_version = TETRIS_GPUEB_FLAT_HANDOFF_VERSION;
+	image->info.payload_offset = 0;
 	image->info.authenticated_bytes = FLAT_BYTES;
+	image->info.profile_id = profile;
 	/* LK source 0x1ed90 -> 0x1ee14: direct copy to SRAM base, no relocation.
 	 * This describes only signed bytes, NOT LK's unauthenticated excess copy.
 	 */
@@ -185,9 +205,36 @@ out:
 int tetris_gpueb_flat_describe(const struct tetris_gpueb_flat *image,
 	struct tetris_gpueb_flat_info *info)
 {
+	u8 digest[32];
+	int ret;
+
 	if (!image || !info || overlaps(image, sizeof(*image), info, sizeof(*info)) ||
 	    overlaps(image->mapping, RESERVE_BYTES, info, sizeof(*info)))
 		return -EINVAL;
+	if (!image->mapping || !image->ops || !image->ops->sha256 ||
+	    image->info.handoff_version != TETRIS_GPUEB_FLAT_HANDOFF_VERSION ||
+	    image->info.reserved_bytes != RESERVE_BYTES ||
+	    image->info.reserved_base < 0x40000000ULL ||
+	    image->info.reserved_base > 0x80000000ULL - RESERVE_BYTES ||
+	    (image->info.reserved_base & (RESERVE_ALIGN - 1)) ||
+	    image->info.payload_offset || image->info.sram_offset ||
+	    image->info.authenticated_bytes != FLAT_BYTES ||
+	    !image->info.profile_id ||
+	    image->info.profile_id != (u32)reviewed(image->info.plaintext_sha256))
+		return -EINVAL;
+	ret = tetris_scp_crypto_check_image(image->ops, image->mapping,
+					  RESERVE_BYTES, RESERVE_BYTES);
+	if (ret)
+		return ret;
+	if (image->ops->physical(image->mapping) != image->info.reserved_base)
+		return -ERANGE;
+	/* The final DT may be published long after the secure boot window closes. */
+	image->ops->sha256(image->mapping, FLAT_BYTES, digest);
+	ret = memcmp(digest, image->info.plaintext_sha256, sizeof(digest)) ?
+		-EBADMSG : 0;
+	erase(digest, sizeof(digest));
+	if (ret)
+		return ret;
 	*info = image->info;
 	return 0;
 }

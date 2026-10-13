@@ -65,6 +65,40 @@ class Static(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("CI-only", result.stderr)
 
+    def test_retained_metadata_is_explicit_and_committed_after_validation(self):
+        producer = (BOARD / "tetris_gpueb_flat.c").read_text()
+        describe = body(producer, "tetris_gpueb_flat_describe")
+        publisher = (BOARD / "tetris_gpueb_flat_publish.c").read_text()
+        for property_name in (
+                "handoff-version", "payload-offset", "authenticated-bytes",
+                "sram-offset", "profile-id", "plaintext-sha256",
+                "primary-header-sha256", "ciphertext-sha256",
+                "leaf-certificate-sha256", "container-sha256"):
+            self.assertEqual(publisher.count('"nothing,' + property_name + '"'), 1)
+        self.assertLess(describe.index("image->ops->sha256("), describe.index("*info = image->info;"))
+        self.assertIn("image->info.payload_offset || image->info.sram_offset", describe)
+        self.assertIn("reviewed(image->info.plaintext_sha256)", describe)
+        self.assertIn("-EBADMSG", describe)
+        self.assertLess(producer.index("tetris_gpueb_authenticate("),
+                        producer.index("image->info.primary_header_sha256"))
+        publish = body(publisher, "tetris_gpueb_flat_publish")
+        self.assertIn("if (ret)\n\t\tgoto abort;", publish)
+        self.assertLess(publish.index("build(copy, &info)"), publish.index("memcpy(fdt, copy, capacity)"))
+        self.assertIn("tetris_gpueb_flat_discard(*image)", publish)
+        for forbidden in ("writel(", "readl(", "arm_smccc_smc(", "tetris_scp_crypto_init("):
+            self.assertNotIn(forbidden, producer + publisher)
+
+    def test_retained_fixture_runner_refuses_local_build(self):
+        runner = Path(__file__).with_name("run_tetris_gpueb_flat.sh")
+        result = subprocess.run(["sh", str(runner)], env={"CI": "false", "PATH": "/usr/bin:/bin"},
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("CI-only", result.stderr)
+        # Validate every compile input exists without invoking a compiler.
+        sources = runner.read_text().split("for source in ", 1)[1].split("; do", 1)[0].split()
+        for name in sources:
+            self.assertTrue((ROOT / "scripts/dtc/libfdt" / (name + ".c")).is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

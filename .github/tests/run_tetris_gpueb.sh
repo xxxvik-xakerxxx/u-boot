@@ -34,3 +34,4 @@ cc=${HOSTCC:-cc}
     "$board/tetris_gpueb_segments.c" \
     -o "$work/gpueb.so"
 "${PYTHON:-python3}" "$root/.github/tests/test_tetris_gpueb_c.py" "$work/gpueb.so"
+sh "$root/.github/tests/run_tetris_gpueb_flat.sh"
