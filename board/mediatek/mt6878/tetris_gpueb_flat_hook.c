@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0+
+#ifndef TETRIS_GPUEB_FINAL_HOST_TEST
 #include <blk.h>
 #include <bootm.h>
 #include <cpu_func.h>
@@ -13,6 +14,8 @@
 #include "tetris_gpueb_layout.h"
 #include "tetris_gpueb_flat_hook.h"
 #include "tetris_gpueb_flat_publish.h"
+#include "tetris_linux_fdt_prepare.h"
+#endif
 
 static struct tetris_gpueb_flat *pending;
 static bool attempted;
@@ -69,8 +72,9 @@ out:
 
 int tetris_gpueb_flat_publish_final(struct bootm_headers *images)
 {
-	phys_addr_t address = 0x80000000ULL;
-	void *old, *final = NULL;
+	struct bootm_headers candidate;
+	phys_addr_t address;
+	void *final;
 	size_t capacity;
 	int ret;
 
@@ -78,42 +82,29 @@ int tetris_gpueb_flat_publish_final(struct bootm_headers *images)
 		return capture_error;
 	if (!pending || !images || !images->ft_addr || !images->ft_len)
 		return -EINVAL;
-	old = images->ft_addr;
-	ret = fdt_check_full(old, images->ft_len);
+	/* Keep the caller's DT unchanged until payload publication succeeds.
+	 * The common clone proves DRAM and LMB bounds before mapping, including
+	 * allocator success with an unchanged address or missing reservation.
+	 */
+	candidate = *images;
+	ret = tetris_linux_fdt_prepare(&candidate);
 	if (ret)
 		goto discard;
-	capacity = ALIGN((size_t)fdt_totalsize(old) + 4096, 4096);
-	if (capacity > 0x200000) {
-		ret = -E2BIG;
-		goto discard;
-	}
-	ret = lmb_alloc_mem(LMB_MEM_ALLOC_MAX, 4096, &address, capacity, LMB_NOOVERWRITE);
-	if (ret)
-		goto discard;
-	final = map_sysmem(address, capacity);
-	if (!final) {
-		ret = -ENOMEM;
-		goto release;
-	}
-	memset(final, 0, capacity);
-	ret = fdt_open_into(old, final, capacity);
-	if (!ret)
-		ret = fdt_add_mem_rsv(final, address, capacity);
-	if (!ret)
-		ret = tetris_gpueb_flat_publish(&pending, final, capacity);
+	final = candidate.ft_addr;
+	capacity = candidate.ft_len;
+	address = map_to_sysmem(final);
+	ret = tetris_gpueb_flat_publish(&pending, final, capacity);
 	if (ret)
 		goto release;
 	/* New final DT contains its own header reservation and no-map payload.
 	 * Keep old DT allocation too; do not risk freeing a shared boot buffer.
 	 */
 	flush_dcache_range((unsigned long)final, (unsigned long)final + capacity);
-	images->ft_addr = final;
-	images->ft_len = fdt_totalsize(final);
+	*images = candidate;
 	/* bootm retains this mapping through Linux handoff; old is borrowed. */
 	return 0;
 release:
-	if (final)
-		unmap_sysmem(final);
+	unmap_sysmem(final);
 	lmb_free(address, capacity, LMB_NOOVERWRITE | LMB_NONOTIFY);
 discard:
 	if (pending && !tetris_gpueb_flat_discard(pending))

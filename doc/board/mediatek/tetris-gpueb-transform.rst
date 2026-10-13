@@ -76,3 +76,12 @@ larger unauthenticated LK copy tail, entry/data/BSS and secure reset/power
 ownership remain unresolved. This candidate starts no GPUEB or GPU and has not
 been flashed. Native faults, actual ARM64 objects and a full opt-in link are
 required before one controlled private-analysis boot.
+
+The late retained-payload publication now reuses the SCP path's bounded
+Linux DT clone. It verifies the actual DRAM/LMB reservation before mapping
+and commits the caller's DT pointer only after payload publication succeeds.
+Allocation, mapping, clone and publication failures retain the original DT;
+an unproven allocation is never mapped or freed. CI exercises the actual
+caller and common clone with real libfdt and fault injection. This correction
+does not enable retention in ordinary builds, remove its modem-profile
+exclusion, program GPU power, release GPUEB reset or establish rendering.

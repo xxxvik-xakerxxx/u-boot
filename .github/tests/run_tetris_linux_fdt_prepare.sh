@@ -15,6 +15,8 @@ for source in fdt fdt_addresses fdt_empty_tree fdt_ro fdt_rw fdt_strerror fdt_sw
     "$cc" $flags -Wno-unused-parameter -Iscripts/dtc/libfdt \
         -c "scripts/dtc/libfdt/$source.c" -o "$work/$source.o"
 done
-"$cc" $flags -Iscripts/dtc/libfdt -c .github/tests/tetris_linux_fdt_prepare.c -o "$work/test.o"
-"$cc" $flags "$work"/*.o -o "$work/test"
-"$work/test"
+for fixture in tetris_linux_fdt_prepare tetris_gpueb_final; do
+    "$cc" $flags -Iscripts/dtc/libfdt -c ".github/tests/$fixture.c" -o "$work/test.o"
+    "$cc" $flags "$work"/*.o -o "$work/test"
+    "$work/test"
+done
