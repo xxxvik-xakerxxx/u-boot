@@ -204,8 +204,17 @@ LMB reservation and DRAM coverage before mapping, including the allocator's
 zero-with-unchanged-address failure case. No secure-state or preparation
 result is invented.
 CI uses real libfdt to reproduce packed-tree NOSPACE and exercise allocation,
-mapping, clone, reservation and validation failures. Hardware recovery remains
-unverified until the corrected loader is installed and cold booted.
+mapping, clone, reservation and validation failures. The corrected fixture
+and ARM64 build passed CI ``38389560147`` at ``f25c01444a``. Its LK image
+SHA256 ``30b5f535e5a2642bbd5d650a65637a123209af242c4246f7da9c2dd0fbefdc04``
+was flashed to lk_a and read back after physical cold boot on r188.
+SCP reported ``secure-handoff-prepared``/error0 and secure state3/error0;
+the 24-entry sensor transport and SensorProxy started automatically, with
+no failed systemd units. The user confirmed display/touch, both rotations
+and automatic brightness. Wi-Fi scan, a bounded GNSS ROM/reset/close cycle
+and native MD first-OFF passed on the same boot; USB/SSH stayed active.
+Stock lk_b and the kernel/rootfs were unchanged. This is one cold boot on
+one handset, not warm-reboot, suspend, cellular or GPU/camera validation.
 
 CI ``35701102610`` built commit ``8066a9a1ee`` with this option enabled.
 LK image SHA256:
