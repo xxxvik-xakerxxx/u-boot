@@ -43,6 +43,7 @@ class LateFdtTests(unittest.TestCase):
         self.assertIn("-FDT_ERR_NOSPACE", fixture)
         self.assertIn("nothing,scp-prepare-stage", fixture)
         self.assertIn("nothing,scp-secure-operation", fixture)
+        self.assertIn('assert(fdt_add_subnode(original, 0, "chosen") >= 0)', fixture)
 
 
 if __name__ == "__main__":

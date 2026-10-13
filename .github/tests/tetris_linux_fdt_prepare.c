@@ -98,7 +98,7 @@ int main(void)
 	unsigned long original_size;
 	int chosen, i;
 	assert(!fdt_create_empty_tree(original, sizeof(original)));
-	assert(!fdt_add_subnode(original, 0, "chosen"));
+	assert(fdt_add_subnode(original, 0, "chosen") >= 0);
 	assert(!fdt_add_mem_rsv(original, 0x9d000000, 0x9c0000));
 	assert(!fdt_pack(original));
 	original_size = fdt_totalsize(original);
